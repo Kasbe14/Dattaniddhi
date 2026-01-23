@@ -32,3 +32,28 @@ func NewVector(id string, vecValues []float32) (*Vector, error) {
 	}
 	return vec, nil
 }
+
+//vector api
+func (v *Vector) ID() string {
+	return v.id
+}
+
+func (v *Vector) Dimensions() int {
+	return v.dimensions
+}
+
+func (v *Vector) Values() []float32 {
+	vecVals := make([]float32, len(v.values))
+	copy(vecVals, v.values)
+	return vecVals
+}
+
+func (v *Vector) Similarity(other *Vector) (float64, error) {
+	if other == nil || v == nil {
+		return 0.0, errors.New("nil vectors")
+	}
+	if v.dimensions != other.dimensions {
+		return 0.0, errors.New("dimension mismatch")
+	}
+	return CosineSimilarity(v.values, other.values)
+}
