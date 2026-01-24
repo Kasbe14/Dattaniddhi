@@ -1,6 +1,9 @@
 package vector
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 func TestSimilarityIdentity(t *testing.T) {
 	vPtr, err := NewVector("xyz420", []float32{69, 69, 420, 67, 6, 7, 6.9})
@@ -10,11 +13,12 @@ func TestSimilarityIdentity(t *testing.T) {
 	simi, err := vPtr.Similarity(vPtr)
 	if err != nil {
 		t.Fatal(err)
-	} else if simi != 1 {
-		t.Fatal("failed identity similarity")
+	} else if math.Abs(simi-1.0) > epsilon {
+		t.Fatal("similarity not close to 1", simi)
 	}
 }
 
+// TODO : floating point comparison logic study and implement
 func TestSimilarityOrthogonal(t *testing.T) {
 	vec1, err := NewVector("bc69mc", []float32{1, 0})
 	if err != nil {
@@ -27,12 +31,12 @@ func TestSimilarityOrthogonal(t *testing.T) {
 	simi, err := vec1.Similarity(vec2)
 	if err != nil {
 		t.Fatal(err)
-	} else if simi != 0 {
-		t.Fatal("failed orthogonal similarity")
+	} else if math.Abs(simi) > epsilon {
+		t.Fatal("failed orthogonal similarity, expected 0 got ", simi)
 	}
 }
 
-func TestDimensionMis(t *testing.T) {
+func TestSimilarityDimensionMis(t *testing.T) {
 	vec1, err := NewVector("bc69mc", []float32{1, 0})
 	if err != nil {
 		t.Fatal(err)
@@ -41,10 +45,8 @@ func TestDimensionMis(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	simi, err := vec1.Similarity(vec2)
-	if err != nil {
-		t.Fatal(err)
-	} else {
-		t.Fatal("pass mismatch with similarity", simi)
+	_, err = vec1.Similarity(vec2)
+	if err == nil {
+		t.Fatal("expected dimension mismatch error")
 	}
 }
