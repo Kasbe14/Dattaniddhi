@@ -11,3 +11,6 @@ Thumbs.db
 
 #Editor
 .vscode/
+
+#gpt coding sessions index
+sessions_index.txt
