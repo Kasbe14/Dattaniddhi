@@ -5,11 +5,13 @@ import (
 	"cmp"
 	"errors"
 	"slices"
+	"sync"
 )
 
 // Initial index state is empty, no dimension assigned, no lock
 // after first add index state each index gets its own fixed dimension, lock ensures dimension doesn't change
 type LinearIndex struct {
+	mu        sync.RWMutex
 	vectors   map[string]*v.Vector
 	dimension int
 	dimLocked bool
@@ -17,6 +19,7 @@ type LinearIndex struct {
 
 func NewLinearIndex() *LinearIndex {
 	return &LinearIndex{
+		mu:        sync.RWMutex{},
 		vectors:   make(map[string]*v.Vector),
 		dimension: 0,
 		dimLocked: false,
@@ -24,10 +27,14 @@ func NewLinearIndex() *LinearIndex {
 }
 
 func (li *LinearIndex) Dimension() int {
+	li.mu.RLock()
+	defer li.mu.RUnlock()
 	return li.dimension
 }
 
 func (li *LinearIndex) Add(vec *v.Vector) error {
+	li.mu.Lock()
+	defer li.mu.Unlock()
 	key := vec.ID()
 	vecDim := vec.Dimensions()
 	if key == "" {
@@ -48,6 +55,8 @@ func (li *LinearIndex) Add(vec *v.Vector) error {
 	return nil
 }
 func (li *LinearIndex) Delete(id string) error {
+	li.mu.Lock()
+	defer li.mu.Unlock()
 	_, ok := li.vectors[id]
 	if !ok {
 		return errors.New("vector doesn't exist in index")
@@ -57,10 +66,14 @@ func (li *LinearIndex) Delete(id string) error {
 	}
 }
 func (li *LinearIndex) Get(id string) (*v.Vector, bool) {
+	li.mu.RLock()
+	defer li.mu.RUnlock()
 	vec, ok := li.vectors[id]
 	return vec, ok
 }
 func (li *LinearIndex) Search(query *v.Vector, k int) ([]SearchResult, error) {
+	li.mu.RLock()
+	defer li.mu.RUnlock()
 	if li.Size() == 0 {
 		return nil, nil
 	}
@@ -95,6 +108,8 @@ func (li *LinearIndex) Search(query *v.Vector, k int) ([]SearchResult, error) {
 	return result[:k], nil
 }
 func (li *LinearIndex) Size() int {
+	li.mu.RLock()
+	defer li.mu.RUnlock()
 	return len(li.vectors)
 }
 
