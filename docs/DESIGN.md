@@ -51,18 +51,22 @@ Raw data is never stored or indexed directly. It must first pass through an *Emb
    
 ### 4.2 Embedder   
 An Embedder is a logical component responsible for converting raw data into vectors.   
+Embedder is stateless and does not generate IDs.
+It only produces embeddings and embedding metadata.
+
 **Key properties**:   
 - Each Embedder supports exactly one input modality (e.g., text, image).   
 - Each Embedder produces vectors of a fixed, invariant dimension.   
 - Each Embedder wraps an external embedding model (local or remote).   
 - The system does not implement or train embedding models itself.   
-The Embedder is the **owner of vector identity**:   
-- It generates and guarantees unique vector IDs.   
 - Vectors must never exist without an originating Embedder.   
 - Consumers of vectors trust the Embedder’s guarantees.   
 >Vectors are meaningless without the Embedder that produced them.   
 
-### 4.3 Vector   
+### 4.3 Ingestion   
+Ingestion Layer owns IDs generation and mapping to the storage reference
+
+### 4.4 Vector   
 A Vector is the numerical representation of raw data produced by an Embedder.   
 **Properties**:   
 - Fixed-length numeric array (dimension defined by the Embedder)   
@@ -72,7 +76,7 @@ A Vector is the numerical representation of raw data produced by an Embedder.
      - A unique vector ID   
 Vectors are **not user-supplied** and **cannot be created independently**.   
 
-### 4.4 Index   
+### 4.5 Index   
 An **Index** is a storage and retrieval structure for vectors.   
 **Design constraints**:   
 - An Index is bound to exactly one Embedder identity   
@@ -83,7 +87,7 @@ An **Index** is a storage and retrieval structure for vectors.
 - Perform similarity search (kNN,HNSW etc.)   
 - Return vector IDs ranked by similarity score   
  
-### 4.5 Similarity & Distance    
+### 4.6 Similarity & Distance    
 Similarity computation is defined implicitly by the Embedder and Index combination.   
 *Examples*:   
 - Cosine similarity   
@@ -92,7 +96,7 @@ Similarity computation is defined implicitly by the Embedder and Index combinati
 These metrics are implementation details, not part of the core API yet.   
 They may be formalized later as the system evolves.   
 
-### 4.6. Search Result   
+### 4.7. Search Result   
 A **Search Result** represents the outcome of querying an Index.
 For the current scope:
 - Contains:
@@ -101,7 +105,7 @@ For the current scope:
 - Does not expose index references or internal metadata
 Future versions may extend this structure.
 
-### 4.7. Retrieval of Original Data (Goal)
+### 4.8. Retrieval of Original Data (Goal)
 The long-term goal of the system is to allow retrieval of original raw data corresponding to vectors.
 *Conceptually*:
 - Vector ID → raw data reference
