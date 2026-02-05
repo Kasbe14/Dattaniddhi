@@ -31,11 +31,14 @@ func CosineSimilarity(vec1, vec2 []float32) (float64, error) {
 	if len(vec1) != len(vec2) {
 		return 0, errors.New("unequal vector lengths")
 	}
-	magA := Magnitude(vec1)
-	magB := Magnitude(vec2)
-	if magA < epsilon || magB < epsilon {
-		return 0, errors.New("zero magnitude vector")
-	}
-	cosine := DotProduct(vec1, vec2) / (magA * magB)
+	//ALL VECTORS PASSED HERE MUST BE NORMALISED
+	// Vectors are normalized at constructions and normalize validates zero-magnitude vector
+	//magA := Magnitude(vec1)
+	// //magB := Magnitude(vec2)
+	// if magA < epsilon || magB < epsilon {
+	// 	return 0, errors.New("zero magnitude vector")
+	// }
+	// cosine similarity of normalized vectors (magnitude=1) = dotproduct
+	cosine := DotProduct(vec1, vec2) /*/ (magA * magB)*/
 	return cosine, nil
 }

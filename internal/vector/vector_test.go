@@ -6,7 +6,7 @@ import (
 )
 
 func TestSimilarityIdentity(t *testing.T) {
-	vPtr, err := NewVector("xyz420", []float32{69, 69, 420, 67, 6, 7, 6.9})
+	vPtr, err := NewVector("xyz420", []float32{69, 69, 420, 67, 6, 7, 6.9}, "text", "cosine")
 	if err != nil {
 		t.Fatal("vector construction failed")
 	}
@@ -20,11 +20,11 @@ func TestSimilarityIdentity(t *testing.T) {
 
 // TODO : floating point comparison logic study and implement
 func TestSimilarityOrthogonal(t *testing.T) {
-	vec1, err := NewVector("bc69mc", []float32{1, 0})
+	vec1, err := NewVector("bc69mc", []float32{1, 0}, "text", "cosine")
 	if err != nil {
 		t.Fatal(err)
 	}
-	vec2, err := NewVector("mc69bc", []float32{0, 1})
+	vec2, err := NewVector("mc69bc", []float32{0, 1}, "text", "cosine")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,11 +37,11 @@ func TestSimilarityOrthogonal(t *testing.T) {
 }
 
 func TestSimilarityDimensionMis(t *testing.T) {
-	vec1, err := NewVector("bc69mc", []float32{1, 0})
+	vec1, err := NewVector("bc69mc", []float32{1, 0}, "text", "cosine")
 	if err != nil {
 		t.Fatal(err)
 	}
-	vec2, err := NewVector("mc69bc", []float32{0, 1, 3})
+	vec2, err := NewVector("mc69bc", []float32{0, 1, 3}, "text", "cosine")
 	if err != nil {
 		t.Fatal(err)
 	}
