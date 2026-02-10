@@ -1,12 +1,13 @@
 package index
 
 import (
-	v "VectorDatabase/internal/vector"
+	"VectorDatabase/internal/types"
 )
 
 type IndexConfig struct {
 	IndexType IndexType
-	DataType  v.DataType
-	Metric    v.SimilarityMetric
+	ModelType types.ModelType
+	DataType  types.DataType
+	Metric    types.SimilarityMetric
 	Dimension int
 }

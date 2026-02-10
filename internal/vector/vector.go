@@ -2,9 +2,6 @@ package vector
 
 import "errors"
 
-type DataType string
-type SimilarityMetric string
-
 //vector is pure data object
 type Vector struct {
 	values     []float32
