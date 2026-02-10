@@ -25,7 +25,6 @@ func NewLinearIndex() *LinearIndex {
 		configLocked: false,
 	}
 }
-
 func (li *LinearIndex) Dimension() int {
 	li.mu.RLock()
 	defer li.mu.RUnlock()

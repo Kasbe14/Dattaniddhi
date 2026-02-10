@@ -5,24 +5,20 @@ import "errors"
 type DataType string
 type SimilarityMetric string
 
+//vector is pure data object
 type Vector struct {
-	id               string
-	values           []float32
-	dimensions       int
-	dataType         DataType
-	similarityMetric SimilarityMetric
+	values     []float32
+	dimensions int
 }
 
 // consturctor for immutable vector
-func NewVector(id string, vecValues []float32, dataType DataType, simMetric SimilarityMetric) (*Vector, error) {
-	if len(vecValues) == 0 {
+func NewVector(vecValues []float32, dim int) (*Vector, error) {
+	vecDim := len(vecValues)
+	if vecDim == 0 {
 		return nil, errors.New("a vector must have atleast one dimension")
 	}
-	if dataType == "" {
-		return nil, errors.New("data type empty")
-	}
-	if simMetric == "" {
-		return nil, errors.New("similarity metric empty")
+	if vecDim != dim {
+		return nil, errors.New("number of vector values not equal to given dimension")
 	}
 	//validate vector
 	if err := validateValues(vecValues); err != nil {
@@ -33,46 +29,19 @@ func NewVector(id string, vecValues []float32, dataType DataType, simMetric Simi
 	if err != nil {
 		return nil, err
 	}
-	//  copying for imutability
-	// copied := make([]float32, len(vecValues))
-	// copy(copied, vecValues)
 	vec := &Vector{
-		id:               id,
-		values:           normalVec,
-		dimensions:       len(normalVec),
-		dataType:         dataType,
-		similarityMetric: simMetric,
+		values:     normalVec,
+		dimensions: dim,
 	}
 	return vec, nil
 }
 
 //vector api
-func (v *Vector) ID() string {
-	return v.id
-}
-
 func (v *Vector) Dimensions() int {
 	return v.dimensions
 }
-
 func (v *Vector) Values() []float32 {
 	vecVals := make([]float32, len(v.values))
 	copy(vecVals, v.values)
 	return vecVals
-}
-func (v *Vector) DataType() DataType {
-	return v.dataType
-}
-func (v *Vector) Metric() SimilarityMetric {
-	return v.similarityMetric
-}
-
-func (v *Vector) Similarity(other *Vector) (float64, error) {
-	if other == nil || v == nil {
-		return 0.0, errors.New("nil vectors")
-	}
-	if v.dimensions != other.dimensions {
-		return 0.0, errors.New("dimension mismatch")
-	}
-	return CosineSimilarity(v.values, other.values)
 }

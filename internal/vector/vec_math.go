@@ -42,3 +42,13 @@ func CosineSimilarity(vec1, vec2 []float32) (float64, error) {
 	cosine := DotProduct(vec1, vec2) /*/ (magA * magB)*/
 	return cosine, nil
 }
+
+func (v *Vector) Similarity(other *Vector) (float64, error) {
+	if other == nil || v == nil {
+		return 0.0, errors.New("nil vectors")
+	}
+	if v.dimensions != other.dimensions {
+		return 0.0, errors.New("dimension mismatch")
+	}
+	return CosineSimilarity(v.values, other.values)
+}
