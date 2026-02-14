@@ -3,7 +3,7 @@ package types
 type SimilarityMetric int
 
 const (
-	Cosine SimilarityMetric = iota
+	Cosine SimilarityMetric = iota + 1
 	Dot
 	Euclidean
 )

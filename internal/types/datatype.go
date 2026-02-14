@@ -3,7 +3,7 @@ package types
 type DataType int
 
 const (
-	Text DataType = iota
+	Text DataType = iota + 1
 	Image
 	Audio
 	Video
