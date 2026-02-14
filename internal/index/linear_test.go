@@ -10,7 +10,7 @@ import (
 func TestNewLinearIndex_Constructor(t *testing.T) {
 	// Sub-test 1: The Happy Path
 	t.Run("ValidConfig", func(t *testing.T) {
-		cfg, err := NewIndexConfig(types.LinearIndex, types.Testmodel, types.Text, types.Cosine, 128)
+		cfg, err := NewIndexConfig(types.LinearIndex, types.Cosine, 128)
 		if err != nil {
 			t.Fatalf("Failed to create config: %v", err)
 		}
@@ -53,7 +53,7 @@ func TestNewLinearIndex_Constructor(t *testing.T) {
 
 // Helper to create a valid index for testing
 func setupIndex(t *testing.T, dim int) *LinearIndex {
-	cfg, _ := NewIndexConfig(types.LinearIndex, types.Testmodel, types.Text, types.Cosine, dim)
+	cfg, _ := NewIndexConfig(types.LinearIndex, types.Cosine, dim)
 	idx, err := NewLinearIndex(cfg)
 	if err != nil {
 		t.Fatalf("failed to setup index: %v", err)
@@ -159,7 +159,7 @@ func TestLinearIndex_Concurrency(t *testing.T) {
 
 // Helper to set up a populated index for testing
 func setupPopulatedIndex(t *testing.T, metric types.SimilarityMetric) *LinearIndex {
-	cfg, _ := NewIndexConfig(types.LinearIndex, types.Testmodel, types.Text, metric, 2)
+	cfg, _ := NewIndexConfig(types.LinearIndex, metric, 2)
 	idx, _ := NewLinearIndex(cfg)
 
 	// Add 3 vectors:
@@ -322,7 +322,7 @@ func TestLinearIndex_Search_K_Boundaries(t *testing.T) {
 	})
 
 	t.Run("Index is Empty", func(t *testing.T) {
-		emptyCfg, _ := NewIndexConfig(types.LinearIndex, types.Testmodel, types.Text, types.Cosine, 2)
+		emptyCfg, _ := NewIndexConfig(types.LinearIndex, types.Cosine, 2)
 		emptyIdx, _ := NewLinearIndex(emptyCfg)
 
 		results, err := emptyIdx.Search(query, 5)

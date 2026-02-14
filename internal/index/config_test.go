@@ -13,8 +13,6 @@ func TestNewIndexConfig_Contracts(t *testing.T) {
 	tests := []struct {
 		name        string
 		indexType   types.IndexType
-		modelType   types.ModelType
-		dataType    types.DataType
 		metric      types.SimilarityMetric
 		dimension   int
 		expectError bool
@@ -23,8 +21,6 @@ func TestNewIndexConfig_Contracts(t *testing.T) {
 		{
 			name:        "Success: Valid Configuration",
 			indexType:   types.LinearIndex,
-			modelType:   types.Testmodel,
-			dataType:    types.Text,
 			metric:      types.Cosine,
 			dimension:   128,
 			expectError: false,
@@ -32,8 +28,6 @@ func TestNewIndexConfig_Contracts(t *testing.T) {
 		{
 			name:        "Contract Violation: Invalid Dimension (Zero)",
 			indexType:   types.LinearIndex,
-			modelType:   types.Testmodel,
-			dataType:    types.Text,
 			metric:      types.Cosine,
 			dimension:   0,
 			expectError: true,
@@ -42,8 +36,6 @@ func TestNewIndexConfig_Contracts(t *testing.T) {
 		{
 			name:        "Contract Violation: Invalid Dimension (Negative)",
 			indexType:   types.LinearIndex,
-			modelType:   types.Testmodel,
-			dataType:    types.Text,
 			metric:      types.Cosine,
 			dimension:   -5,
 			expectError: true,
@@ -52,48 +44,24 @@ func TestNewIndexConfig_Contracts(t *testing.T) {
 		{
 			name:        "Contract Violation: Invalid IndexType",
 			indexType:   types.IndexType(-1), // Casting a bad value
-			modelType:   types.Testmodel,
-			dataType:    types.Text,
 			metric:      types.Cosine,
 			dimension:   128,
 			expectError: true,
 			errorMsg:    "invalid index type",
 		},
 		{
-			name:        "Contract Violation: Invalid DataType",
-			indexType:   types.LinearIndex,
-			modelType:   types.Testmodel,
-			dataType:    types.DataType(999),
-			metric:      types.Cosine,
-			dimension:   128,
-			expectError: true,
-			errorMsg:    "invalid data type",
-		},
-		{
 			name:        "Contract Violation: Invalid Metric",
 			indexType:   types.LinearIndex,
-			modelType:   types.Testmodel,
-			dataType:    types.Text,
 			metric:      types.SimilarityMetric(2020),
 			dimension:   128,
 			expectError: true,
 			errorMsg:    "invalid metric type",
 		},
-		{
-			name:        "Contract Violation: Invalid ModelType",
-			indexType:   types.LinearIndex,
-			modelType:   types.ModelType(-1),
-			dataType:    types.Text,
-			metric:      types.Cosine,
-			dimension:   128,
-			expectError: true,
-			errorMsg:    "invalid model type",
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg, err := NewIndexConfig(tt.indexType, tt.modelType, tt.dataType, tt.metric, tt.dimension)
+			cfg, err := NewIndexConfig(tt.indexType, tt.metric, tt.dimension)
 
 			if tt.expectError {
 				if err == nil {
@@ -121,12 +89,10 @@ func TestIndexConfig_InvariantsAndGetters(t *testing.T) {
 	// Arrange
 	expectedDim := 256
 	expectedIdx := types.HNSWIndex
-	expectedModel := types.Testmodel
-	expectedData := types.Image
 	expectedMetric := types.Euclidean
 
 	// Act
-	cfg, err := NewIndexConfig(expectedIdx, expectedModel, expectedData, expectedMetric, expectedDim)
+	cfg, err := NewIndexConfig(expectedIdx, expectedMetric, expectedDim)
 	if err != nil {
 		t.Fatalf("Failed to create config: %v", err)
 	}
@@ -137,12 +103,6 @@ func TestIndexConfig_InvariantsAndGetters(t *testing.T) {
 	}
 	if cfg.IndexType() != expectedIdx {
 		t.Errorf("Invariant broken: Expected index type %v, got %v", expectedIdx, cfg.IndexType())
-	}
-	if cfg.ModelType() != expectedModel {
-		t.Errorf("Invariant broken: Expected model type %v, got %v", expectedModel, cfg.ModelType())
-	}
-	if cfg.DataType() != expectedData {
-		t.Errorf("Invariant broken: Expected data type %v, got %v", expectedData, cfg.DataType())
 	}
 	if cfg.Metric() != expectedMetric {
 		t.Errorf("Invariant broken: Expected metric %v, got %v", expectedMetric, cfg.Metric())
