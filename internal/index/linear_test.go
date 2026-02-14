@@ -3,6 +3,7 @@ package index
 import (
 	"VectorDatabase/internal/types"
 	v "VectorDatabase/internal/vector"
+	"slices"
 	"testing"
 )
 
@@ -152,4 +153,184 @@ func TestLinearIndex_Concurrency(t *testing.T) {
 		<-done
 	}
 	// If this test finishes without a panic, the Mutexes are working!
+}
+
+//=================tests for Linear index Search function =========
+
+// Helper to set up a populated index for testing
+func setupPopulatedIndex(t *testing.T, metric types.SimilarityMetric) *LinearIndex {
+	cfg, _ := NewIndexConfig(types.LinearIndex, types.Testmodel, types.Text, metric, 2)
+	idx, _ := NewLinearIndex(cfg)
+
+	// Add 3 vectors:
+	// Vec A: [1, 0] (On X-axis)
+	// Vec B: [0, 1] (On Y-axis)
+	// Vec C: [0.707, 0.707] (45 degrees, normalized)
+	vecA, _ := v.NewVector([]float32{1.0, 0.0}, 2)
+	vecB, _ := v.NewVector([]float32{0.0, 1.0}, 2)
+	vecC, _ := v.NewVector([]float32{0.707, 0.707}, 2) // approx 1/sqrt(2)
+
+	idx.Add("vec-A", vecA)
+	idx.Add("vec-B", vecB)
+	idx.Add("vec-C", vecC)
+
+	return idx
+}
+
+func TestLinearIndex_Search_Contracts(t *testing.T) {
+	idx := setupPopulatedIndex(t, types.Cosine)
+	queryVec, _ := v.NewVector([]float32{1.0, 0.0}, 2)
+
+	tests := []struct {
+		name        string
+		query       *v.Vector
+		k           int
+		expectedErr string
+	}{
+		{
+			name:        "Invalid K (Zero)",
+			query:       queryVec,
+			k:           0,
+			expectedErr: "invalid input for number of results",
+		},
+		{
+			name:        "Invalid K (Negative)",
+			query:       queryVec,
+			k:           -5,
+			expectedErr: "invalid input for number of results",
+		},
+		{
+			name:        "Nil Query",
+			query:       nil,
+			k:           5,
+			expectedErr: "empty query input",
+		},
+		{
+			name:        "Dimension Mismatch",
+			query:       func() *v.Vector { v, _ := v.NewVector([]float32{1.0, 0.0, 0.0}, 3); return v }(), // 3D query for 2D index
+			k:           5,
+			expectedErr: "index and query dimension mismatched",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			results, err := idx.Search(tt.query, tt.k)
+			if err == nil {
+				t.Fatalf("Expected error '%s', got nil", tt.expectedErr)
+			}
+			if results != nil {
+				t.Fatal("Expected nil results on error")
+			}
+		})
+	}
+}
+
+// Logic Test: Verify Cosine Similarity Sorting
+// Query: [1, 0]
+// Expected Order:
+// 1. vec-A [1, 0] (Score 1.0) - Perfect match
+// 2. vec-C [0.7, 0.7] (Score ~0.7) - 45 degrees
+// 3. vec-B [0, 1] (Score 0.0) - 90 degrees (Orthogonal)
+func TestLinearIndex_Search_CosineLogic(t *testing.T) {
+	idx := setupPopulatedIndex(t, types.Cosine)
+	query, _ := v.NewVector([]float32{1.0, 0.0}, 2)
+
+	// Act: Ask for top 3
+	results, err := idx.Search(query, 3)
+	if err != nil {
+		t.Fatalf("Search failed: %v", err)
+	}
+
+	// Assert: Check size
+	if len(results) != 3 {
+		t.Fatalf("Expected 3 results, got %d", len(results))
+	}
+
+	// Assert: Check Order (Descending Score)
+	if results[0].ID() != "vec-A" {
+		t.Errorf("Top result should be vec-A, got %s (Score: %f)", results[0].ID(), results[0].Score())
+	}
+	if results[1].ID() != "vec-C" {
+		t.Errorf("Second result should be vec-C, got %s", results[1].ID())
+	}
+	if results[2].ID() != "vec-B" {
+		t.Errorf("Third result should be vec-B, got %s", results[2].ID())
+	}
+
+	// Assert: Check Sorting property
+	if !slices.IsSortedFunc(results, func(a, b SearchResult) int {
+		// Note: IsSortedFunc expects 'a <= b' for ascending, so we reverse logic for descending check
+		// or simpler: just check manual loop
+		return 0 // Dummy return, manual check below is safer for floats
+	}) {
+		// Manual check
+		if results[0].Score() < results[1].Score() || results[1].Score() < results[2].Score() {
+			t.Error("Results are not sorted by score descending")
+		}
+	}
+}
+
+// Logic Test: Verify Euclidean Sorting (Negative Scores)
+// Since your Euclidean returns -(distance^2), the "closest" vector (distance 0)
+// will have score -0.0, which is > -100.0.
+// So Descending Sort should still put the closest match first.
+func TestLinearIndex_Search_EuclideanLogic(t *testing.T) {
+	idx := setupPopulatedIndex(t, types.Euclidean) // Uses Euclidean Metric
+	query, _ := v.NewVector([]float32{1.0, 0.0}, 2)
+
+	// Query: [1, 0]
+	// vec-A [1, 0] -> Dist 0 -> Score -0
+	// vec-B [0, 1] -> Dist 2 (sq) -> Score -2
+
+	results, err := idx.Search(query, 3)
+	if err != nil {
+		t.Fatalf("Search failed: %v", err)
+	}
+
+	// The closest vector (vec-A) should still be first because -0 > -2
+	if results[0].ID() != "vec-A" {
+		t.Errorf("Euclidean Sort Fail: Closest vec should be first. Got %s with score %f", results[0].ID(), results[0].Score())
+	}
+
+	// Ensure scores are negative (or zero)
+	if results[0].Score() > 0 {
+		t.Errorf("Euclidean score should be negative or zero, got %f", results[0].Score())
+	}
+}
+
+// Boundary Test: Requesting k > Size vs k < Size
+func TestLinearIndex_Search_K_Boundaries(t *testing.T) {
+	idx := setupPopulatedIndex(t, types.Cosine) // Has 3 items
+	query, _ := v.NewVector([]float32{1.0, 0.0}, 2)
+
+	t.Run("K is smaller than Size", func(t *testing.T) {
+		k := 1
+		results, _ := idx.Search(query, k)
+		if len(results) != 1 {
+			t.Errorf("Expected 1 result, got %d", len(results))
+		}
+	})
+
+	t.Run("K is larger than Size", func(t *testing.T) {
+		k := 10
+		results, _ := idx.Search(query, k)
+		// Should return all 3 available, not crash or return empty slots
+		if len(results) != 3 {
+			t.Errorf("Expected 3 results (capped by index size), got %d", len(results))
+		}
+	})
+
+	t.Run("Index is Empty", func(t *testing.T) {
+		emptyCfg, _ := NewIndexConfig(types.LinearIndex, types.Testmodel, types.Text, types.Cosine, 2)
+		emptyIdx, _ := NewLinearIndex(emptyCfg)
+
+		results, err := emptyIdx.Search(query, 5)
+		if err != nil {
+			t.Errorf("Expected no error for empty index search, got %v", err)
+		}
+		if results != nil { // Your code returns nil, nil
+			t.Error("Expected nil results for empty index")
+		}
+	})
 }

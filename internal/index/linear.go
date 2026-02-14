@@ -1,6 +1,8 @@
 package index
 
 import (
+	"VectorDatabase/internal/types"
+	"VectorDatabase/internal/vector"
 	v "VectorDatabase/internal/vector"
 	"cmp"
 	"errors"
@@ -95,17 +97,44 @@ func (li *LinearIndex) Search(query *v.Vector, k int) ([]SearchResult, error) {
 	}
 	// for k >= index size might need li.Size() memory capacity
 	result := make([]SearchResult, 0, li.Size())
-	for key, val := range li.vectors {
-		simScore, err := query.Similarity(val)
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, SearchResult{
-			vecId: key,
-			score: simScore,
-		})
-	}
 	//sort descending similarity score
+	qVal := query.Values()
+	switch li.config.Metric() {
+	case types.Cosine:
+		for key, val := range li.vectors {
+			simScore, err := vector.Cosine(val.Values(), qVal)
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, SearchResult{
+				vecId: key,
+				score: simScore,
+			})
+		}
+		// For current design vector values are nomalized during creation so cosine = dot, (might change later)
+	case types.Dot:
+		for key, val := range li.vectors {
+			simScore, err := vector.DotProduct(val.Values(), qVal)
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, SearchResult{
+				vecId: key,
+				score: simScore,
+			})
+		}
+	case types.Euclidean:
+		for key, val := range li.vectors {
+			simScore, err := vector.Euclidean(val.Values(), qVal)
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, SearchResult{
+				vecId: key,
+				score: simScore,
+			})
+		}
+	}
 	slices.SortFunc(result, func(a, b SearchResult) int {
 		return cmp.Compare(b.score, a.score)
 	})
