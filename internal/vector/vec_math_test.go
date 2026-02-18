@@ -12,7 +12,7 @@ func TestCosineSimilaritySameVector(t *testing.T) {
 	if err != nil {
 		t.Fatalf("vector Normalized function failed %v", err)
 	}
-	cos, err := CosineSimilarity(norm, norm)
+	cos, err := Cosine(norm, norm)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,10 +50,96 @@ func TestDotProduct(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		result := DotProduct(tt.vec1, tt.vec2)
+		result, err := DotProduct(tt.vec1, tt.vec2)
+		if err != nil {
+			t.Errorf("%v", err)
+		}
 		if math.Abs(result-tt.expected) > 1e-10 {
 			t.Errorf("DotProduct(%v, %v): got %v, want %v", tt.vec1, tt.vec2, result, tt.expected)
 		}
+	}
+}
+func TestEuclidean(t *testing.T) {
+	tests := []struct {
+		name        string
+		vec1        []float32
+		vec2        []float32
+		expected    float64
+		expectError bool
+	}{
+		{
+			name:        "Identity (Same Vectors)",
+			vec1:        []float32{1.0, 2.0, 3.0},
+			vec2:        []float32{1.0, 2.0, 3.0},
+			expected:    0.0, // Distance is 0, return -0
+			expectError: false,
+		},
+		{
+			name: "Simple Distance",
+			vec1: []float32{1.0, 1.0},
+			vec2: []float32{4.0, 5.0},
+			// Math: (1-4)^2 + (1-5)^2 = (-3)^2 + (-4)^2 = 9 + 16 = 25
+			// Function returns -(sum), so expected is -25.0
+			expected:    -25.0,
+			expectError: false,
+		},
+		{
+			name: "Negative Values in Vector",
+			vec1: []float32{-2.0, 0.0},
+			vec2: []float32{2.0, 0.0},
+			// Math: (-2 - 2)^2 + (0 - 0)^2 = (-4)^2 = 16
+			// Return -16.0
+			expected:    -16.0,
+			expectError: false,
+		},
+		{
+			name: "Floating Point Precision",
+			vec1: []float32{0.1, 0.2},
+			vec2: []float32{0.3, 0.4},
+			// Math: (0.1-0.3)^2 + (0.2-0.4)^2 = (-0.2)^2 + (-0.2)^2
+			// = 0.04 + 0.04 = 0.08
+			// Return -0.08
+			expected:    -0.08,
+			expectError: false,
+		},
+		{
+			name:        "Contract Violation: Length Mismatch",
+			vec1:        []float32{1.0, 2.0},
+			vec2:        []float32{1.0, 2.0, 3.0},
+			expected:    0.0,
+			expectError: true,
+		},
+		{
+			name:        "Edge Case: Empty Vectors",
+			vec1:        []float32{},
+			vec2:        []float32{},
+			expected:    0.0, // Loop doesn't run, sum is 0
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := Euclidean(tt.vec1, tt.vec2)
+
+			// 1. Check Error State
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("Expected error for %s, got nil", tt.name)
+				}
+				return // Stop checking result if we expected an error
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected error for %s: %v", tt.name, err)
+				}
+			}
+
+			// 2. Check Result (using epsilon for float comparison)
+			// We use a small epsilon (0.000001) because float math is rarely exact
+			if math.Abs(result-tt.expected) > 1e-6 {
+				t.Errorf("Result mismatch. Got %f, want %f", result, tt.expected)
+			}
+		})
 	}
 }
 

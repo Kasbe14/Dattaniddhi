@@ -2,6 +2,7 @@ package vector
 
 import (
 	"errors"
+	"fmt"
 	"math"
 )
 
@@ -17,17 +18,20 @@ func Magnitude(values []float32) float64 {
 	return math.Sqrt(sum)
 }
 
-// assume vec1 and v2 have equal length; caller must ensure
-func DotProduct(vec1, vec2 []float32) float64 {
+// dot validates lengths
+func DotProduct(vec1, vec2 []float32) (float64, error) {
 	var dotProduct float64
+	if len(vec1) != len(vec2) {
+		return 0, errors.New("unequal vector lengths")
+	}
 	for i := range vec1 {
 		dotProduct += float64(vec1[i]) * float64(vec2[i])
 	}
-	return dotProduct
+	return dotProduct, nil
 }
 
 // measurement of direction
-func CosineSimilarity(vec1, vec2 []float32) (float64, error) {
+func Cosine(vec1, vec2 []float32) (float64, error) {
 	if len(vec1) != len(vec2) {
 		return 0, errors.New("unequal vector lengths")
 	}
@@ -39,10 +43,23 @@ func CosineSimilarity(vec1, vec2 []float32) (float64, error) {
 	// 	return 0, errors.New("zero magnitude vector")
 	// }
 	// cosine similarity of normalized vectors (magnitude=1) = dotproduct
-	cosine := DotProduct(vec1, vec2) /*/ (magA * magB)*/
+	cosine, err := DotProduct(vec1, vec2) /*/ (magA * magB)*/
+	if err != nil {
+		return 0, fmt.Errorf("eror from dot, %w", err)
+	}
 	return cosine, nil
 }
 
+func Euclidean(vec1, vec2 []float32) (float64, error) {
+	if len(vec1) != len(vec2) {
+		return 0.0, errors.New("unequal vector lengths")
+	}
+	sum := 0.0
+	for i := range vec1 {
+		sum += (float64(vec1[i]) - float64(vec2[i])) * (float64(vec1[i]) - float64(vec2[i]))
+	}
+	return -(sum), nil
+}
 func (v *Vector) Similarity(other *Vector) (float64, error) {
 	if other == nil || v == nil {
 		return 0.0, errors.New("nil vectors")
@@ -50,5 +67,5 @@ func (v *Vector) Similarity(other *Vector) (float64, error) {
 	if v.dimensions != other.dimensions {
 		return 0.0, errors.New("dimension mismatch")
 	}
-	return CosineSimilarity(v.values, other.values)
+	return Cosine(v.values, other.values)
 }
