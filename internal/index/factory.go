@@ -12,7 +12,7 @@ type IndexFactory interface {
 type DefaultIndexFactory struct {
 }
 
-func (d *DefaultIndexFactory) CreateIndex(cfg IndexConfig) (VectorIndex, error) {
+func (d DefaultIndexFactory) CreateIndex(cfg IndexConfig) (VectorIndex, error) {
 	switch cfg.IndexType() {
 	case types.LinearIndex:
 		return NewLinearIndex(cfg)
