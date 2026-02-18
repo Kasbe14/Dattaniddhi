@@ -2,6 +2,7 @@ package collection
 
 import (
 	"VectorDatabase/internal/index"
+	"VectorDatabase/internal/types"
 	"VectorDatabase/internal/vector"
 	"sync"
 
@@ -17,6 +18,8 @@ type Collection struct {
 	//id mappings exteranl user usage internal internal processing
 	extToInt map[string]int
 	intToExt map[int]string
+	//  Playload in-memory
+	payload map[string]any
 }
 
 type Result struct {
@@ -25,12 +28,31 @@ type Result struct {
 }
 
 func NewCollection(cfg CollectionConfig) (*Collection, error) {
+	if cfg.Dimension <= 0 {
+		return nil, ErrInvalidDimension
+	}
+	if cfg.Name == "" {
+		return nil, ErrInvalidCollectionName
+	}
+	switch cfg.Metric {
+	case types.Cosine, types.Dot, types.Euclidean:
+	//ok valid input
+	default:
+		return nil, ErrInvalidMetric
+	}
+	switch cfg.IndexType {
+	case types.HNSWIndex, types.LinearIndex, types.IVFIndex, types.PQIndex:
+	//ok valid input
+	default:
+		return nil, ErrInvalidIndexType
+	}
 	indexConfig, err := index.NewIndexConfig(cfg.IndexType, cfg.Metric, cfg.Dimension)
 	if err != nil {
 		return nil, err
 	}
 	//pointer value satisfying IndexFactory interface
-	indexFactory := &index.DefaultIndexFactory{}
+	//indexFactory := &index.DefaultIndexFactory{}
+	var indexFactory index.DefaultIndexFactory
 	//return new index instance of type cfg.IndexType
 	idx, err := indexFactory.CreateIndex(indexConfig)
 	if err != nil {
@@ -42,15 +64,16 @@ func NewCollection(cfg CollectionConfig) (*Collection, error) {
 		idCounter: 0,
 		extToInt:  make(map[string]int),
 		intToExt:  make(map[int]string),
+		payload:   make(map[string]any),
 	}, nil
 }
 
 func (c *Collection) Insert(vecVals []float32, payload any) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	// if len(vecVals) != c.config.Dimension {
-	// 	return "", ErrInvalidDimension
-	// }
+	if len(vecVals) != c.config.Dimension {
+		return "", ErrInvalidDimension
+	}
 	//Constructing the vector
 	vector, err := vector.NewVector(vecVals, c.config.Dimension)
 	if err != nil {
@@ -68,16 +91,17 @@ func (c *Collection) Insert(vecVals []float32, payload any) (string, error) {
 	//Add vector to index
 	added, err := c.index.Add(internalID, vector)
 	//rollback if id exist internal courruption
-	if added {
-		delete(c.extToInt, externalID)
-		delete(c.intToExt, internalID)
-		return "", ErrInternalIDCollision
-	}
 	if err != nil {
 		delete(c.extToInt, externalID)
 		delete(c.intToExt, internalID)
 		return "", err
 	}
+	if added {
+		delete(c.extToInt, externalID)
+		delete(c.intToExt, internalID)
+		return "", ErrInternalIDCollision
+	}
+	c.payload[externalID] = payload
 	return externalID, nil
 }
 func (c *Collection) Search(queryVals []float32, k int) ([]Result, error) {
@@ -114,11 +138,12 @@ func (c *Collection) Delete(id string) error {
 	}
 	delete(c.extToInt, id)
 	delete(c.intToExt, internalID)
+	delete(c.payload, id)
 	return nil
 }
 func (c *Collection) Get(id string) (any, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-
-	return nil, false
+	payload, ok := c.payload[id]
+	return payload, ok
 }
