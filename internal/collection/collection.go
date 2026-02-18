@@ -1,0 +1,124 @@
+package collection
+
+import (
+	"VectorDatabase/internal/index"
+	"VectorDatabase/internal/vector"
+	"sync"
+
+	"github.com/google/uuid"
+)
+
+// collection owns index and its lifecyle ensures collection level invariants
+type Collection struct {
+	mu        sync.RWMutex
+	config    CollectionConfig
+	index     index.VectorIndex
+	idCounter int
+	//id mappings exteranl user usage internal internal processing
+	extToInt map[string]int
+	intToExt map[int]string
+}
+
+type Result struct {
+	VecID string
+	Score float64
+}
+
+func NewCollection(cfg CollectionConfig) (*Collection, error) {
+	indexConfig, err := index.NewIndexConfig(cfg.IndexType, cfg.Metric, cfg.Dimension)
+	if err != nil {
+		return nil, err
+	}
+	//pointer value satisfying IndexFactory interface
+	indexFactory := &index.DefaultIndexFactory{}
+	//return new index instance of type cfg.IndexType
+	idx, err := indexFactory.CreateIndex(indexConfig)
+	if err != nil {
+		return nil, err
+	}
+	return &Collection{
+		config:    cfg,
+		index:     idx,
+		idCounter: 0,
+		extToInt:  make(map[string]int),
+		intToExt:  make(map[int]string),
+	}, nil
+}
+
+func (c *Collection) Insert(vecVals []float32, payload any) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	// if len(vecVals) != c.config.Dimension {
+	// 	return "", ErrInvalidDimension
+	// }
+	//Constructing the vector
+	vector, err := vector.NewVector(vecVals, c.config.Dimension)
+	if err != nil {
+		return "", err
+	}
+	//generate external id
+	externalID := uuid.NewString()
+	//internal id and total vector add in index ever
+	c.idCounter += 1
+	internalID := c.idCounter
+	//storing and mapping ids
+	c.extToInt[externalID] = internalID
+	c.intToExt[internalID] = externalID
+
+	//Add vector to index
+	added, err := c.index.Add(internalID, vector)
+	//rollback if id exist internal courruption
+	if added {
+		delete(c.extToInt, externalID)
+		delete(c.intToExt, internalID)
+		return "", ErrInternalIDCollision
+	}
+	if err != nil {
+		delete(c.extToInt, externalID)
+		delete(c.intToExt, internalID)
+		return "", err
+	}
+	return externalID, nil
+}
+func (c *Collection) Search(queryVals []float32, k int) ([]Result, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.config.Dimension != len(queryVals) {
+		return []Result{}, ErrInvalidDimension
+	}
+	queryVector, err := vector.NewVector(queryVals, c.config.Dimension)
+	if err != nil {
+		return []Result{}, err
+	}
+	idxResult, err := c.index.Search(queryVector, k)
+	if err != nil {
+		return []Result{}, err
+	}
+	colResult := make([]Result, len(idxResult))
+
+	for i, val := range idxResult {
+		colResult[i] = Result{c.intToExt[val.VecId], val.Score}
+	}
+	return colResult, nil
+}
+func (c *Collection) Delete(id string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	internalID, ok := c.extToInt[id]
+	if !ok {
+		return ErrNotFound
+	}
+	err := c.index.Delete(internalID)
+	if err != nil {
+		return err
+	}
+	delete(c.extToInt, id)
+	delete(c.intToExt, internalID)
+	return nil
+}
+func (c *Collection) Get(id string) (any, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return nil, false
+}

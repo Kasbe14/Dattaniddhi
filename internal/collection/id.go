@@ -1,4 +1,4 @@
-package ingest
+package collection
 
 type IDGenerator interface {
 	NewID() string
