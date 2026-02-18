@@ -16,7 +16,7 @@ import (
 // IndexConfig is now Imutable and index is schema driven not data driven i.e first IndexConfig structure is defined
 type LinearIndex struct {
 	mu      sync.RWMutex
-	vectors map[string]*v.Vector
+	vectors map[int]*v.Vector
 	config  IndexConfig
 }
 
@@ -27,7 +27,7 @@ func NewLinearIndex(cfg IndexConfig) (*LinearIndex, error) {
 	}
 	return &LinearIndex{
 		mu:      sync.RWMutex{},
-		vectors: make(map[string]*v.Vector),
+		vectors: make(map[int]*v.Vector),
 		config:  cfg,
 	}, nil
 }
@@ -38,11 +38,11 @@ func (li *LinearIndex) Dimension() int {
 }
 
 // Returns true if vector already exist else error
-func (li *LinearIndex) Add(id string, vec *v.Vector) (bool, error) {
+func (li *LinearIndex) Add(id int, vec *v.Vector) (bool, error) {
 	li.mu.Lock()
 	defer li.mu.Unlock()
-	if id == "" {
-		return false, errors.New("vector id empty")
+	if id < 0 {
+		return false, errors.New("invalid ID")
 	}
 	if vec == nil {
 		return false, errors.New("empty vector")
@@ -57,7 +57,7 @@ func (li *LinearIndex) Add(id string, vec *v.Vector) (bool, error) {
 	li.vectors[id] = vec
 	return false, nil
 }
-func (li *LinearIndex) Delete(id string) error {
+func (li *LinearIndex) Delete(id int) error {
 	li.mu.Lock()
 	defer li.mu.Unlock()
 	_, ok := li.vectors[id]
@@ -68,7 +68,7 @@ func (li *LinearIndex) Delete(id string) error {
 	return nil
 
 }
-func (li *LinearIndex) Get(id string) (*v.Vector, bool) {
+func (li *LinearIndex) Get(id int) (*v.Vector, bool) {
 	li.mu.RLock()
 	defer li.mu.RUnlock()
 	vec, ok := li.vectors[id]
@@ -107,8 +107,8 @@ func (li *LinearIndex) Search(query *v.Vector, k int) ([]SearchResult, error) {
 				return nil, err
 			}
 			result = append(result, SearchResult{
-				vecId: key,
-				score: simScore,
+				VecId: key,
+				Score: simScore,
 			})
 		}
 		// For current design vector values are nomalized during creation so cosine = dot, (might change later)
@@ -119,8 +119,8 @@ func (li *LinearIndex) Search(query *v.Vector, k int) ([]SearchResult, error) {
 				return nil, err
 			}
 			result = append(result, SearchResult{
-				vecId: key,
-				score: simScore,
+				VecId: key,
+				Score: simScore,
 			})
 		}
 	case types.Euclidean:
@@ -130,13 +130,13 @@ func (li *LinearIndex) Search(query *v.Vector, k int) ([]SearchResult, error) {
 				return nil, err
 			}
 			result = append(result, SearchResult{
-				vecId: key,
-				score: simScore,
+				VecId: key,
+				Score: simScore,
 			})
 		}
 	}
 	slices.SortFunc(result, func(a, b SearchResult) int {
-		return cmp.Compare(b.score, a.score)
+		return cmp.Compare(b.Score, a.Score)
 	})
 	if k > li.Size() {
 		return result, nil

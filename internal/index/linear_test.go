@@ -61,35 +61,35 @@ func setupIndex(t *testing.T, dim int) *LinearIndex {
 	return idx
 }
 
-// Contract: Add must reject invalid IDs and dimension mismatches.
+// Contract: Add must reject invalid VecIds and dimension mismatches.
 // Invariant: After Add, the vector must be retrievable via Get.
 func TestLinearIndex_AddAndGet(t *testing.T) {
 	idx := setupIndex(t, 3)
 	vec, _ := v.NewVector([]float32{1.0, 0.0, 0.0}, 3)
 
 	t.Run("Successful Add", func(t *testing.T) {
-		exists, err := idx.Add("vec-1", vec)
+		exists, err := idx.Add(1, vec)
 		if err != nil || exists {
 			t.Errorf("Expected success, got exists=%v, err=%v", exists, err)
 		}
 
 		// Verify via Get (RLock path)
-		retrieved, ok := idx.Get("vec-1")
+		retrieved, ok := idx.Get(1)
 		if !ok || retrieved != vec {
 			t.Error("Vector was not stored correctly")
 		}
 	})
 
-	t.Run("Add Duplicate ID", func(t *testing.T) {
-		exists, err := idx.Add("vec-1", vec)
+	t.Run("Add Duplicate VecId", func(t *testing.T) {
+		exists, err := idx.Add(1, vec)
 		if err != nil || !exists {
-			t.Error("Expected exists=true for duplicate ID")
+			t.Error("Expected exists=true for duplicate VecId")
 		}
 	})
 
 	t.Run("Contract Violation: Dimension Mismatch", func(t *testing.T) {
 		badVec, _ := v.NewVector([]float32{1.0, 0.0}, 2) // Dim 2 instead of 3
-		_, err := idx.Add("bad-vec", badVec)
+		_, err := idx.Add(2, badVec)
 		if err == nil || err.Error() != "dimension mismatch" {
 			t.Errorf("Expected dimension mismatch error, got %v", err)
 		}
@@ -101,24 +101,24 @@ func TestLinearIndex_AddAndGet(t *testing.T) {
 func TestLinearIndex_Delete(t *testing.T) {
 	idx := setupIndex(t, 3)
 	vec, _ := v.NewVector([]float32{1.0, 0.0, 0.0}, 3)
-	idx.Add("vec-1", vec)
+	idx.Add(1, vec)
 
 	t.Run("Successful Delete", func(t *testing.T) {
-		err := idx.Delete("vec-1")
+		err := idx.Delete(1)
 		if err != nil {
 			t.Errorf("Delete failed: %v", err)
 		}
 
-		_, ok := idx.Get("vec-1")
+		_, ok := idx.Get(1)
 		if ok {
 			t.Error("Vector still exists after deletion")
 		}
 	})
 
 	t.Run("Delete Non-existent", func(t *testing.T) {
-		err := idx.Delete("ghost")
+		err := idx.Delete(5)
 		if err == nil {
-			t.Error("Expected error when deleting non-existent ID")
+			t.Error("Expected error when deleting non-existent VecId")
 		}
 	})
 }
@@ -135,7 +135,7 @@ func TestLinearIndex_Concurrency(t *testing.T) {
 	// Start a writer
 	go func() {
 		for i := 0; i < 100; i++ {
-			idx.Add("concur-vec", vec)
+			idx.Add(1, vec)
 		}
 		done <- true
 	}()
@@ -143,7 +143,7 @@ func TestLinearIndex_Concurrency(t *testing.T) {
 	// Start a reader
 	go func() {
 		for i := 0; i < 100; i++ {
-			idx.Get("concur-vec")
+			idx.Get(1)
 		}
 		done <- true
 	}()
@@ -170,9 +170,9 @@ func setupPopulatedIndex(t *testing.T, metric types.SimilarityMetric) *LinearInd
 	vecB, _ := v.NewVector([]float32{0.0, 1.0}, 2)
 	vecC, _ := v.NewVector([]float32{0.707, 0.707}, 2) // approx 1/sqrt(2)
 
-	idx.Add("vec-A", vecA)
-	idx.Add("vec-B", vecB)
-	idx.Add("vec-C", vecC)
+	idx.Add(1, vecA)
+	idx.Add(2, vecB)
+	idx.Add(3, vecC)
 
 	return idx
 }
@@ -248,14 +248,14 @@ func TestLinearIndex_Search_CosineLogic(t *testing.T) {
 	}
 
 	// Assert: Check Order (Descending Score)
-	if results[0].ID() != "vec-A" {
-		t.Errorf("Top result should be vec-A, got %s (Score: %f)", results[0].ID(), results[0].Score())
+	if results[0].VecId != 1 {
+		t.Errorf("Top result should be 1, got %d (Score: %f)", results[0].VecId, results[0].Score)
 	}
-	if results[1].ID() != "vec-C" {
-		t.Errorf("Second result should be vec-C, got %s", results[1].ID())
+	if results[1].VecId != 3 {
+		t.Errorf("Second result should be 3, got %d", results[1].VecId)
 	}
-	if results[2].ID() != "vec-B" {
-		t.Errorf("Third result should be vec-B, got %s", results[2].ID())
+	if results[2].VecId != 2 {
+		t.Errorf("Third result should be 2, got %d", results[2].VecId)
 	}
 
 	// Assert: Check Sorting property
@@ -265,7 +265,7 @@ func TestLinearIndex_Search_CosineLogic(t *testing.T) {
 		return 0 // Dummy return, manual check below is safer for floats
 	}) {
 		// Manual check
-		if results[0].Score() < results[1].Score() || results[1].Score() < results[2].Score() {
+		if results[0].Score < results[1].Score || results[1].Score < results[2].Score {
 			t.Error("Results are not sorted by score descending")
 		}
 	}
@@ -289,13 +289,13 @@ func TestLinearIndex_Search_EuclideanLogic(t *testing.T) {
 	}
 
 	// The closest vector (vec-A) should still be first because -0 > -2
-	if results[0].ID() != "vec-A" {
-		t.Errorf("Euclidean Sort Fail: Closest vec should be first. Got %s with score %f", results[0].ID(), results[0].Score())
+	if results[0].VecId != 1 {
+		t.Errorf("Euclidean Sort Fail: Closest vec should be first. Got %d with score %f", results[0].VecId, results[0].Score)
 	}
 
 	// Ensure scores are negative (or zero)
-	if results[0].Score() > 0 {
-		t.Errorf("Euclidean score should be negative or zero, got %f", results[0].Score())
+	if results[0].Score > 0 {
+		t.Errorf("Euclidean score should be negative or zero, got %f", results[0].Score)
 	}
 }
 
