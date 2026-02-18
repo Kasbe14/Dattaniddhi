@@ -15,7 +15,7 @@ func NewVector(vecValues []float32, dim int) (*Vector, error) {
 		return nil, errors.New("a vector must have atleast one dimension")
 	}
 	if vecDim != dim {
-		return nil, errors.New("number of vector values not equal to given dimension")
+		return nil, errors.New("invalid dimension mismatch")
 	}
 	//validate vector
 	if err := validateValues(vecValues); err != nil {

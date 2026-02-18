@@ -37,7 +37,7 @@ func TestNewVector_ContractsAndLogic(t *testing.T) {
 			vecValues:     []float32{1, 2, 3},
 			dim:           2,
 			expectError:   true,
-			errorContains: "number of vector values not equal to given dimension",
+			errorContains: "invalid dimension mismatch",
 		},
 		{
 			name:        "Contract Violation: NaN Values",
