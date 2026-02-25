@@ -15,7 +15,7 @@ type segmentHeader struct {
 type segment struct {
 	segID       uint64
 	file        *os.File
-	currentSize uint32
+	currentSize uint64
 }
 
 func newSegmentHeader(v uint8, segID uint64) *segmentHeader {
@@ -94,6 +94,6 @@ func openExistingSegment(dirPath string, id uint64) (*segment, error) {
 	return &segment{
 		segID:       id,
 		file:        file,
-		currentSize: uint32(fileInfo.Size()),
+		currentSize: uint64(fileInfo.Size()),
 	}, nil
 }
