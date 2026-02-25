@@ -1,7 +1,7 @@
 package ingest
 
 import (
-	"VectorDatabase/internal/index"
+	"github.com/Kasbe14/Dattaniddhi/internal/index"
 	"sync"
 )
 
@@ -28,7 +28,10 @@ func (ir *indexRegistry) GetOrCreateIndex(cfg index.IndexConfig) index.VectorInd
 		return idx
 	}
 	//If index doesn't exit create and return new instance of a empty index, unlocked config and add to lookup register
-	idx := ir.factory.CreateIndex(cfg)
+	idx, err := ir.factory.CreateIndex(cfg)
+	if err != nil {
+		//
+	}
 	ir.registry[cfg] = idx
 	return idx
 }

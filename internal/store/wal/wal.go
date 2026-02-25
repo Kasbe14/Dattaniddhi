@@ -58,7 +58,10 @@ func NewWAL(dir string, sp SyncPolicy) (*WAL, error) {
 			return nil, err
 		}
 		// TODO : helper function getLatestLSN() to get scan the segment for record and get lates lsn
-		lsn = getLatestLSN(*activeSeg)
+		lsn, err = getLatestLSN(*activeSeg)
+		// if err != nil {
+		// 	return nil, err
+		// }
 	case false:
 		// no segment file exists create new one
 		segID = 1
@@ -115,6 +118,11 @@ func getLatestSegmentID(dir string) (uint64, bool, error) {
 		}
 	}
 	return segId, found, nil
+}
+
+func getLatestLSN(seg segment) (uint64, error) {
+
+	return 0, nil
 }
 
 func (wal *WAL) Append() error {

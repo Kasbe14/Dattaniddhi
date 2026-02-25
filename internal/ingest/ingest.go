@@ -1,7 +1,6 @@
 package ingest
 
 import (
-	v "VectorDatabase/internal/vector"
 	"context"
 )
 
@@ -14,8 +13,8 @@ type Inserter interface {
 	InsertPreEmbed(
 		ctx context.Context,
 		vec []float32,
-		inputDataType v.DataType,
-		simMetric v.SimilarityMetric,
+		// inputDataType v.DataType,
+		// simMetric v.SimilarityMetric,
 		model string) (
 		InsertResult, error)
 }

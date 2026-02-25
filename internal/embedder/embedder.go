@@ -1,7 +1,7 @@
 package embedder
 
 import (
-	"VectorDatabase/internal/vector"
+	"github.com/Kasbe14/Dattaniddhi/internal/vector"
 	"context"
 )
 

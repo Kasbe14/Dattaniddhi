@@ -1,7 +1,7 @@
 package index
 
 import (
-	"VectorDatabase/internal/types"
+	"github.com/Kasbe14/Dattaniddhi/internal/types"
 )
 
 type IndexFactory interface {

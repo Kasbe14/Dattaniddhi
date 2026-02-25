@@ -1,8 +1,8 @@
 package index
 
 import (
-	"VectorDatabase/internal/types"
-	v "VectorDatabase/internal/vector"
+	"github.com/Kasbe14/Dattaniddhi/internal/types"
+	v "github.com/Kasbe14/Dattaniddhi/internal/vector"
 	"slices"
 	"testing"
 )

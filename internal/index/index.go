@@ -1,7 +1,7 @@
 package index
 
 import (
-	v "VectorDatabase/internal/vector"
+	v "github.com/Kasbe14/Dattaniddhi/internal/vector"
 )
 
 type VectorIndex interface {

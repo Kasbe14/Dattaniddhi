@@ -4,7 +4,7 @@ import (
 	"sync"
 	"testing"
 
-	"VectorDatabase/internal/types"
+	"github.com/Kasbe14/Dattaniddhi/internal/types"
 )
 
 // -----------------------------------------------------------------------------

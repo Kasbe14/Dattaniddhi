@@ -1,4 +1,4 @@
-module VectorDatabase
+module github.com/Kasbe14/Dattaniddhi
 
 go 1.25.6
 

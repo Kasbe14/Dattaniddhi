@@ -1,9 +1,9 @@
 package collection
 
 import (
-	"VectorDatabase/internal/index"
-	"VectorDatabase/internal/types"
-	"VectorDatabase/internal/vector"
+	"github.com/Kasbe14/Dattaniddhi/internal/index"
+	"github.com/Kasbe14/Dattaniddhi/internal/types"
+	"github.com/Kasbe14/Dattaniddhi/internal/vector"
 	"errors"
 	"sync"
 
