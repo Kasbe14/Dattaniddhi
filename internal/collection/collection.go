@@ -4,6 +4,7 @@ import (
 	"VectorDatabase/internal/index"
 	"VectorDatabase/internal/types"
 	"VectorDatabase/internal/vector"
+	"errors"
 	"sync"
 
 	"github.com/google/uuid"
@@ -121,6 +122,9 @@ func (c *Collection) Search(queryVals []float32, k int) ([]Result, error) {
 	colResult := make([]Result, len(idxResult))
 
 	for i, val := range idxResult {
+		if _, ok := c.intToExt[val.VecId]; !ok {
+			return []Result{}, errors.New("id doesn't exist internal corruption")
+		}
 		colResult[i] = Result{c.intToExt[val.VecId], val.Score}
 	}
 	return colResult, nil
