@@ -38,7 +38,18 @@ func encodeSegmentHeader(segHeader segmentHeader) []byte {
 	return buf
 }
 
+// Create New Segment file
 func createSegment(dirPath string, id uint64) (*segment, error) {
+	info, err := os.Stat(dirPath)
+	if err != nil {
+		return nil, err
+	}
+	if os.IsNotExist(err) {
+		return nil, fmt.Errorf("WAL directory doesn't exists %s", dirPath)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("path exists but is not a directory %s", dirPath)
+	}
 	//create zero padded id based file name
 	fileName := fmt.Sprintf("%010d.waldrky", id)
 	//   ful path to store to
@@ -52,5 +63,37 @@ func createSegment(dirPath string, id uint64) (*segment, error) {
 		segID:       id,
 		file:        file,
 		currentSize: 0,
+	}, nil
+}
+
+// to open existing segment file with highest segID
+func openExistingSegment(dirPath string, id uint64) (*segment, error) {
+	info, err := os.Stat(dirPath)
+	if os.IsNotExist(err) {
+		return nil, fmt.Errorf("WAL directory doesn't exists %s", dirPath)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("path exists but is not a directory %s", dirPath)
+	}
+	//create zero padded id based file name
+	fileName := fmt.Sprintf("%010d.waldrky", id)
+	//   ful path to store to
+	fullPath := filepath.Join(dirPath, fileName)
+	// existing file open only for read and writing
+	file, err := os.OpenFile(fullPath, os.O_APPEND|os.O_RDWR, 0644)
+	if err != nil {
+		return nil, err
+	}
+	fileInfo, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	return &segment{
+		segID:       id,
+		file:        file,
+		currentSize: uint32(fileInfo.Size()),
 	}, nil
 }
