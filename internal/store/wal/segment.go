@@ -41,11 +41,11 @@ func encodeSegmentHeader(segHeader segmentHeader) []byte {
 // Create New Segment file
 func createSegment(dirPath string, id uint64) (*segment, error) {
 	info, err := os.Stat(dirPath)
-	if err != nil {
-		return nil, err
-	}
 	if os.IsNotExist(err) {
 		return nil, fmt.Errorf("WAL directory doesn't exists %s", dirPath)
+	}
+	if err != nil {
+		return nil, err
 	}
 	if !info.IsDir() {
 		return nil, fmt.Errorf("path exists but is not a directory %s", dirPath)
