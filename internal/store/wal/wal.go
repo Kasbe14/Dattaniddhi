@@ -1,7 +1,9 @@
 package wal
 
 import (
+	"encoding/binary"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -30,6 +32,7 @@ const (
 	walVersion uint8 = 1
 )
 
+// Orchestrator for the segment files and api for collections
 type WAL struct {
 	mu            sync.Mutex
 	dir           string
@@ -57,11 +60,11 @@ func NewWAL(dir string, sp SyncPolicy) (*WAL, error) {
 		if err != nil {
 			return nil, err
 		}
-		// TODO : helper function getLatestLSN() to get scan the segment for record and get lates lsn
+		// : helper function getLatestLSN() to scan the segment for record and get lates lsn
 		lsn, err = getLatestLSN(*activeSeg)
-		// if err != nil {
-		// 	return nil, err
-		// }
+		if err != nil {
+			return nil, err
+		}
 	case false:
 		// no segment file exists create new one
 		segID = 1
@@ -120,9 +123,53 @@ func getLatestSegmentID(dir string) (uint64, bool, error) {
 	return segId, found, nil
 }
 
-func getLatestLSN(seg segment) (uint64, error) {
-
-	return 0, nil
+// gets the latest log sequence number from the existing segment file
+func getLatestLSN(activeSeg segment) (uint64, error) {
+	//open temporary second read only file descriptor and close it on function exit
+	file, err := os.Open(activeSeg.file.Name())
+	if err != nil {
+		return 0, err
+	}
+	defer file.Close()
+	offset := segmentHeaderByteSize
+	// Jump the segment header
+	_, err = file.Seek(int64(offset), io.SeekStart)
+	if err != nil {
+		return 0, err
+	}
+	var latestLSN uint64
+	// buff to laod the recrod header
+	buffer := make([]byte, int(recordHeaderByteSize))
+	for {
+		//load record header into ther buffer
+		n, err := io.ReadFull(file, buffer)
+		if err != nil {
+			if err == io.EOF || err == io.ErrUnexpectedEOF {
+				// Torn write or EOF reached
+				break
+			}
+			return 0, err
+		}
+		if n != int(recordHeaderByteSize) {
+			break
+		}
+		recordLength := binary.LittleEndian.Uint32(buffer[8:12])
+		if recordLength < 36 {
+			// torn write or corruption :
+			// A valid record is atleast 36 bytes (recheader + crc)
+			break
+		}
+		latestLSN = binary.LittleEndian.Uint64(buffer[16:24])
+		// payloadSize + 4 crc bytes offset
+		// recordlenth = total size or record wrapper (32B recheader + Variable (payload) + 4B CRC)
+		newOffset := recordLength - 32
+		//jump to next record header byte
+		_, err = file.Seek(int64(newOffset), io.SeekCurrent)
+		if err != nil {
+			return 0, err
+		}
+	}
+	return latestLSN, nil
 }
 
 func (wal *WAL) Append() error {
