@@ -1,192 +1,77 @@
-# Vector Database – Design Document (v1)
+# Dattanidhi – System Design Document (v2.0)
+
+> **Disclaimer:** Dattanidhi is an educational project. It is a work-in-progress designed as a hands-on exploration of low-level systems engineering, concurrency, and database durability. While built with "production-grade" discipline, it is meant for learning rather than enterprise deployment.
 
 ## 1. Problem Statement
 
-> This project implements the **core engine of a vector database**. The system stores vector embeddings, enforces strong invariants, and supports similarity search over those vectors. It is designed to sit **between embedding generation and raw data retrieval systems**.
->
-> The system **does not generate data** and **does not retrieve original payloads** (images, text, audio). Instead, it indexes vectors and returns **references (IDs) and similarity scores**, which downstream systems can use to fetch original data from external storage (e.g., S3, DBs).
->
+This project implements the **core engine of a standalone vector database**. The system stores vector embeddings, enforces strong schema invariants, ensures data durability, and supports similarity search. It is designed to sit between embedding generation and raw data retrieval systems.
+
+The system **does not generate data** and **does not retrieve original payloads** (images, text, audio). Instead, it indexes vectors and returns references (IDs) and similarity scores, which downstream systems use to fetch original data from external storage.
+
 ---
 
 ## 2. High-Level Architecture
 
-```
-Raw Data
-   ↓
-Embedder (external models / APIs)
-   ↓
-Ingestion Layer
-   ↓
-Vector Database (this project)
-   ↓
-Retrieval System (external)
-   ↓
-Original Data
-```
+Dattanidhi enforces a strict separation between **Policy** (user-facing identity and semantics) and **Mechanism** (mathematical search and byte-level storage).
 
-This repository implements the **Vector Database** and prepares the foundation for the **Ingestion Layer**.
+    External Embedder / API
+              ↓
+    [ Policy: Collection Layer ] ← (Validates schema, translates UUIDs to internal IDs)
+              ↓
+    [ Mechanism: Index Layer ]   ← (Mathematical vector search via RWMutex)
+              ↓
+    [ Persistence: WAL Layer ]   ← (Binary Write-Ahead Log for crash recovery)
 
 ---
 
 ## 3. Core Concepts
 
-### 3.1 Vector
-
+### 3.1 Vector (`internal/vector`)
 A `Vector` is an **immutable, fully-formed data structure** representing an embedding.
+* **Invariants:** Must have a positive dimension, no `NaN`/`Inf` values, and is automatically normalized to a unit vector at construction.
+* **Immutability:** The internal slice cannot be modified after creation, preventing external memory corruption.
 
-**Invariants:**
+### 3.2 Index (`internal/index`)
+The `Index` is the raw search mechanism. It knows nothing about external UUIDs or AI models.
+* **Schema-Driven:** Governed by an immutable `IndexConfig` (Dimension, Metric, Type).
+* **Internal Addressing:** Operates strictly on zero-indexed integer IDs (`VecId`).
 
-* A vector MUST have:
-
-  * ID
-  * Normalized values
-  * Dimension
-  * DataType
-  * SimilarityMetric
-* Vectors are normalized at construction time
-* A vector can never exist without embedder context
-
-**Implications:**
-
-* No partial or "empty" vectors are allowed
-* Similarity functions rely on normalization invariants
+### 3.3 Collection (`internal/collection`)
+The `Collection` acts as the Database Identity Layer.
+* **Responsibilities:** Generates standard `UUIDv7/String` IDs, translates them to internal integer IDs, and manages the semantic `CollectionConfig` (DataType, ModelName).
+* **Rollbacks:** Ensures atomic operations. If an index insertion fails, ID mappings are instantly reverted to prevent database corruption.
 
 ---
 
-### 3.2 Index
+## 4. Concurrency Model
 
-An `Index` is a storage and search structure for vectors.
-
-**Responsibilities:**
-
-* Store vectors
-* Enforce index-level invariants
-* Perform similarity search
-
-**Non-responsibilities:**
-
-* ID generation
-* Vector normalization
-* Payload storage
+* **Index Level:** Implementations (like `LinearIndex`) utilize `sync.RWMutex`. This allows high-throughput concurrent read-heavy search operations while safely serializing `Add` and `Delete` mutations.
+* **Collection Level:** Employs a separate `sync.RWMutex` to protect the ID translation maps (`extToInt`, `intToExt`) and the payload store from race conditions during concurrent API requests.
 
 ---
 
-### 3.3 Index Configuration
+## 5. Persistence Architecture: Write-Ahead Log (WIP)
 
-Each index has an internal, immutable configuration:
+To guarantee durability, Dattanidhi uses a custom binary Write-Ahead Log (`internal/wal`).
 
-```go
-IndexConfig {
-    Dimension        int
-    DataType         DataType
-    SimilarityMetric SimilarityMetric
-}
-```
-
-**IndexConfig invariants:**
-
-* Locked on first successful insert
-* All subsequent vectors must match exactly
-* Violations result in errors
+* **Segment Files:** The log is split into `.waldrky` segment files. Each begins with a 16-byte header containing magic bytes (`SANGITA`) and a Segment ID.
+* **Binary Encoding:** Operations are serialized into a strict binary format. A record includes a 32-byte header (Version, LSN, OpType) followed by the payload (Vector bits, UUIDs).
+* **Integrity:** Every complete record wrapper is sealed with an IEEE CRC32 checksum to detect disk corruption.
+* **Sync Policies:** Tunable durability via `SyncEverySec`, `SyncAlways`, or `SyncOS`.
 
 ---
 
-## 4. Search Semantics
+## 6. Current Scope & Execution Status
 
-### 4.1 Search Input
+**Included (MVP):**
+* ✅ Vector construction and mathematical validation.
+* ✅ Linear index implementation with concurrency controls.
+* ✅ Collection layer for identity and schema enforcement.
 
-* Query vector
-* Integer `k` (number of results)
+**Active Development:**
+* 🔄 **Phase 5 (Persistence):** Building the binary WAL, segment cycling, and crash recovery logic.
 
-### 4.2 Search Output
-
-* Slice of `SearchResult`
-
-  * Vector ID
-  * Similarity score
-
-### 4.3 Guarantees
-
-* Results sorted by descending similarity score
-* If `0 < k <= index size`: return `k` results
-* If `k > index size`: return all results
-* Empty index → empty result, no error
-
-### 4.4 Non-Guarantees
-
-* At least one result
-* Data generation
-* Payload retrieval
-
----
-
-## 5. Similarity Metrics
-
-* Vectors are normalized at construction
-* Cosine similarity reduces to dot product
-
-**Invariant:**
-
-* All similarity functions assume normalized vectors
-
----
-
-## 6. Concurrency Model
-
-* Index implementations use `sync.RWMutex`
-* Read-heavy workloads are supported
-* Mutation operations are serialized
-
----
-
-## 7. Current Scope (MVP)
-
-Included:
-
-* Vector construction and validation
-* Linear index implementation
-* Strict invariant enforcement
-* Search correctness
-* Unit tests for all behaviors
-
-Excluded (for now):
-
-* Ingestion orchestration
-* Embedder execution
-* Persistence
-* Payload storage
-
----
-
-## 8. Upcoming Phase
-
-### Phase 5: Ingestion Layer
-
-Planned responsibilities:
-
-* Accept raw data
-* Call embedder
-* Generate vector IDs
-* Construct vectors
-* Route vectors to appropriate index
-* Reject invalid flows early
-
----
-
-## 9. Design Philosophy
-
-* Invariants enforced at construction time
-* No "half-valid" objects
-* Fail fast, fail explicitly
-* Simple core, extensible edges
-
----
-
-## 10. Status
-
-* Vector: ✅ Complete
-* Index (Linear): ✅ Complete
-* Search: ✅ Complete
-* Tests: ✅ Complete
-* Ingestion Layer: ⏳ Pending
-* Persistence: ⏳ Pending
+**Upcoming Phases:**
+* ⏳ **Phase 3:** Pluggable persistent payload storage (replacing current in-memory map).
+* ⏳ **Phase 4:** API-facing Ingestion pipeline.
+* ⏳ **Phase 7:** Advanced Index structures (HNSW, IVF, PQ).
