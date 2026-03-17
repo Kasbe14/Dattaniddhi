@@ -36,14 +36,15 @@ func encodeRecordHeader(recHeader recordHeader) []byte {
 }
 
 type recordWrapper struct {
-	recHeader     recordHeader
-	payload       payload
+	recHeader recordHeader
+	// payload       payload
+	payload       []byte
 	checksumCRC32 uint32
 }
 
-func newRecordWrapper(rh recordHeader, pl payload) *recordWrapper {
+func newRecordWrapper(rh recordHeader, pl []byte) *recordWrapper {
 	// Assing the record length with variable payload size
-	rh.recordLength = uint32(32 + pl.size() + 4)
+	rh.recordLength = uint32(32 + len(pl) + 4)
 	return &recordWrapper{
 		recHeader: rh,
 		payload:   pl,
@@ -51,11 +52,12 @@ func newRecordWrapper(rh recordHeader, pl payload) *recordWrapper {
 }
 
 func (rw *recordWrapper) encode() []byte {
-	plSize := rw.payload.size()
+	plSize := len(rw.payload)
 	bufSize := 32 + int(plSize) + 4
 	buf := make([]byte, bufSize)
 	rhBytes := encodeRecordHeader(rw.recHeader)
-	plBytes := rw.payload.encode()
+	// plBytes := rw.payload.encode()
+	plBytes := rw.payload
 	offset := 0
 	copy(buf[offset:offset+32], rhBytes)
 	offset += 32
