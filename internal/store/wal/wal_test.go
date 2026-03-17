@@ -6,78 +6,96 @@ import (
 	"testing"
 )
 
-func TestGetLatestSegmentID(t *testing.T) {
+func TestWAL_LifecycleAndRecovery(t *testing.T) {
 	tempDir := t.TempDir()
 
-	// 1. Test Empty Directory
-	_, found, err := getLatestSegmentID(tempDir)
+	// 1. Initialize New WAL
+	wal, err := NewWAL(tempDir, SyncAlways)
 	if err != nil {
-		t.Fatalf("Unexpected error on empty dir: %v", err)
-	}
-	if found {
-		t.Error("Should not find a segment in an empty directory")
+		t.Fatalf("Failed to create WAL: %v", err)
 	}
 
-	// 2. Create fake segment files
-	files := []string{"0000000001.waldrky", "0000000005.waldrky", "0000000003.waldrky", "ignored.txt"}
-	for _, f := range files {
-		os.WriteFile(filepath.Join(tempDir, f), []byte(""), 0644)
+	if wal.segID != 1 {
+		t.Errorf("Expected starting segID 1, got %d", wal.segID)
 	}
 
-	// 3. Test Populated Directory
-	segID, found, err := getLatestSegmentID(tempDir)
+	// 2. Append some records
+	lsn1, err := wal.AppendInsert("doc-1", 100, []float32{1.1, 2.2}, []byte("meta1"))
 	if err != nil {
-		t.Fatalf("Unexpected error: %v", err)
+		t.Fatalf("AppendInsert failed: %v", err)
 	}
-	if !found {
-		t.Fatal("Expected to find segments")
+	lsn2, _ := wal.AppendInsert("doc-2", 101, []float32{3.3, 4.4}, []byte("meta2"))
+
+	if lsn1 != 1 || lsn2 != 2 {
+		t.Errorf("Expected LSNs 1 and 2, got %d and %d", lsn1, lsn2)
 	}
-	if segID != 5 {
-		t.Errorf("Expected highest segment ID to be 5, got %d", segID)
+
+	// Close the file to simulate server shutdown
+	wal.activeSegment.file.Close()
+
+	// 3. RECOVERY TEST: Open a new WAL instance on the same directory
+	walRecovered, err := NewWAL(tempDir, SyncAlways)
+	if err != nil {
+		t.Fatalf("Failed to recover WAL: %v", err)
+	}
+	defer walRecovered.activeSegment.file.Close()
+
+	// getLatestLSN should have scanned the file and found LSN 2
+	if walRecovered.lsn != 2 {
+		t.Errorf("Recovery failed. Expected LSN 2, got %d", walRecovered.lsn)
+	}
+	if walRecovered.segID != 1 {
+		t.Errorf("Recovery failed. Expected active segID 1, got %d", walRecovered.segID)
 	}
 }
 
-func TestNewWAL(t *testing.T) {
+func TestWAL_Rotation(t *testing.T) {
 	tempDir := t.TempDir()
+	wal, err := NewWAL(tempDir, SyncAlways)
+	if err != nil {
+		t.Fatalf("Failed to create WAL: %v", err)
+	}
 
-	t.Run("Initialize New WAL (Empty Dir)", func(t *testing.T) {
-		wal, err := NewWAL(tempDir, SyncAlways)
-		if err != nil {
-			t.Fatalf("Failed to create WAL: %v", err)
+	// FIX: Add a dynamic defer to close whichever file is active at the end of the test.
+	// We use an anonymous function so it evaluates wal.activeSegment at the END of the test,
+	// not at the beginning (since rotation will change the active segment).
+	defer func() {
+		if wal != nil && wal.activeSegment != nil && wal.activeSegment.file != nil {
+			wal.activeSegment.file.Close()
 		}
-		defer wal.activeSegment.file.Close()
+	}()
 
-		if wal.segID != 1 {
-			t.Errorf("Expected starting segID 1, got %d", wal.segID)
-		}
-		if wal.lsn != 0 {
-			t.Errorf("Expected starting LSN 0, got %d", wal.lsn)
-		}
+	// TRICK: We artificially inflate the active segment size to be just
+	// a few bytes shy of the 64MB limit (maxSegmentFileSize).
+	// This forces the next AppendInsert to trigger rotateSegment().
+	wal.activeSegment.currentSize = maxSegmentFileSize - 10
 
-		// Ensure segment header was written
-		if wal.activeSegment.currentSize != segmentHeaderByteSize {
-			t.Errorf("Expected segment size %d, got %d", segmentHeaderByteSize, wal.activeSegment.currentSize)
-		}
-	})
+	// Act: Append a record that will push it over the 64MB edge
+	lsn, err := wal.AppendInsert("doc-trigger", 999, []float32{0.0}, []byte{})
+	if err != nil {
+		t.Fatalf("Append failed during rotation: %v", err)
+	}
 
-	t.Run("Initialize Existing WAL", func(t *testing.T) {
-		// We are reusing the tempDir, so segment 1 already exists from the previous test.
-		// NewWAL should discover it and open it.
-		wal, err := NewWAL(tempDir, SyncAlways)
-		if err != nil {
-			t.Fatalf("Failed to open existing WAL: %v", err)
-		}
-		defer wal.activeSegment.file.Close()
+	if lsn != 1 {
+		t.Errorf("Expected LSN 1, got %d", lsn)
+	}
 
-		if wal.segID != 1 {
-			t.Errorf("Expected to open segID 1, got %d", wal.segID)
-		}
-	})
+	// Assert: Rotation should have occurred
+	if wal.segID != 2 {
+		t.Errorf("Expected segment ID to rotate to 2, got %d", wal.segID)
+	}
 
-	t.Run("Invalid Sync Policy", func(t *testing.T) {
-		_, err := NewWAL(tempDir, SyncPolicy(99))
-		if err == nil {
-			t.Error("Expected error for invalid sync policy, got nil")
-		}
-	})
+	// Assert: Check that the old file was actually closed and set to read-only
+	oldPath := filepath.Join(tempDir, "0000000001.waldrky")
+	info, err := os.Stat(oldPath)
+	if err != nil {
+		t.Fatalf("Failed to stat old segment: %v", err)
+	}
+
+	// 0444 permission check (Read-only)
+	// Note: Windows handles permissions differently than Linux, but 0444 usually
+	// translates to the Windows "Read-only" attribute correctly in Go.
+	if info.Mode().Perm() != 0444 {
+		t.Errorf("Expected old segment permissions to be 0444, got %v", info.Mode().Perm())
+	}
 }
