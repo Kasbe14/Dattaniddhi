@@ -97,3 +97,13 @@ func openExistingSegment(dirPath string, id uint64) (*segment, error) {
 		currentSize: uint64(fileInfo.Size()),
 	}, nil
 }
+
+// append to the segment file and update the segment currentsize
+func (s *segment) append(data []byte) (int, error) {
+	n, err := s.file.Write(data)
+	if err != nil {
+		return 0, err
+	}
+	s.currentSize += uint64(n)
+	return n, nil
+}
