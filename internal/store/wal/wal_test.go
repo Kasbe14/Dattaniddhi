@@ -99,3 +99,63 @@ func TestWAL_Rotation(t *testing.T) {
 		t.Errorf("Expected old segment permissions to be 0444, got %v", info.Mode().Perm())
 	}
 }
+func TestWAL_AppendDelete(t *testing.T) {
+	tempDir := t.TempDir()
+	wal, err := NewWAL(tempDir, SyncAlways)
+	if err != nil {
+		t.Fatalf("Failed to create WAL: %v", err)
+	}
+	// Clean up
+	defer func() {
+		if wal != nil && wal.activeSegment != nil && wal.activeSegment.file != nil {
+			wal.activeSegment.file.Close()
+		}
+	}()
+
+	t.Run("Basic AppendDelete", func(t *testing.T) {
+		lsn, err := wal.AppendDelete("doc-to-delete", 100)
+		if err != nil {
+			t.Fatalf("AppendDelete failed: %v", err)
+		}
+
+		if lsn != 1 {
+			t.Errorf("Expected LSN 1, got %d", lsn)
+		}
+
+		// Ensure the segment size actually increased beyond just the header
+		if wal.activeSegment.currentSize <= segmentHeaderByteSize {
+			t.Error("Segment size did not increase after AppendDelete")
+		}
+	})
+
+	t.Run("AppendDelete Triggers Rotation", func(t *testing.T) {
+		// TRICK: Artificially inflate the active segment size to just below 64MB limit
+		wal.activeSegment.currentSize = maxSegmentFileSize - 5
+
+		// Act: Append a delete record that will push it over the edge
+		lsn, err := wal.AppendDelete("doc-trigger", 101)
+		if err != nil {
+			t.Fatalf("AppendDelete failed during rotation: %v", err)
+		}
+
+		if lsn != 2 {
+			t.Errorf("Expected LSN 2, got %d", lsn)
+		}
+
+		// Assert: Rotation should have occurred
+		if wal.segID != 2 {
+			t.Errorf("Expected segment ID to rotate to 2, got %d", wal.segID)
+		}
+
+		// Assert: Check that the old file was actually closed and set to read-only
+		oldPath := filepath.Join(tempDir, "0000000001.waldrky")
+		info, err := os.Stat(oldPath)
+		if err != nil {
+			t.Fatalf("Failed to stat old segment: %v", err)
+		}
+
+		if info.Mode().Perm() != 0444 {
+			t.Errorf("Expected old segment permissions to be 0444, got %v", info.Mode().Perm())
+		}
+	})
+}
