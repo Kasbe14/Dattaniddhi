@@ -217,8 +217,41 @@ func (wal *WAL) AppendInsert(extID string, intID uint64, vecData []float32, meta
 	return currentLSN, nil
 }
 
-func (wal *WAL) AppendDelete(externalID string, internalID uint64) (uint64, error) {
-	return 0, nil
+func (wal *WAL) AppendDelete(extID string, intID uint64) (uint64, error) {
+	//create and enocode payload before lock (concurrent)
+	pl := &deletePayload{
+		externalID: extID,
+		internalID: intID,
+	}
+	payloadBytes := pl.encode()
+	//lock to write sequntially
+	wal.mu.Lock()
+	defer wal.mu.Unlock()
+	//update lsn and append payload
+	wal.lsn++
+	currentLSN := wal.lsn
+	rh := newRecordHeader(walVersion, wal.lsn, OpDelete)
+	rw := newRecordWrapper(*rh, payloadBytes)
+	recordWrapperBytes := rw.encode()
+
+	//roll over policy if segment file >= 64mb
+	segmentFileSize := uint64(len(recordWrapperBytes)) + wal.activeSegment.currentSize
+	if segmentFileSize > maxSegmentFileSize {
+		err := wal.rotateSegment()
+		if err != nil {
+			return 0, err
+		}
+		//write the record to new active segment file
+		_, err = wal.activeSegment.append(recordWrapperBytes)
+		if err != nil {
+			return 0, err
+		}
+		return currentLSN, nil
+	}
+	//append to the segment file if filesize < 64mb
+	wal.activeSegment.append(recordWrapperBytes)
+	// write bytes to segment
+	return currentLSN, nil
 }
 
 // Create  new active segment file with current segID and segmentheader
@@ -261,3 +294,5 @@ func (wal *WAL) Close() error {
 	}
 	return nil
 }
+
+// TODO : update operation uisng delete and insert 2 operations for now later crate and update payload
