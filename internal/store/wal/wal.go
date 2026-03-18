@@ -34,7 +34,7 @@ const (
 	maxSegmentFileSize uint64 = 64 * 1024 * 1024
 )
 
-// Orchestrator for the segment files and api for collections
+// Orchestrator for the segment files and api for collections, Own by the database layer (not implemented yet)
 type WAL struct {
 	mu            sync.Mutex
 	dir           string
@@ -200,20 +200,26 @@ func (wal *WAL) AppendInsert(extID string, intID uint64, vecData []float32, meta
 	//roll over policy if segment file >= 64mb
 	segmentFileSize := uint64(len(recordWrapperBytes)) + wal.activeSegment.currentSize
 	if segmentFileSize > maxSegmentFileSize {
+		//New segment file with new SegId and SegmentHeader written
 		err := wal.rotateSegment()
 		if err != nil {
 			return 0, err
 		}
-		//write the record to new active segment file
-		_, err = wal.activeSegment.append(recordWrapperBytes)
+	}
+	//append to the segment file (new segment file if rotated or same)
+	wal.activeSegment.append(recordWrapperBytes)
+	// write bytes to disk according to sync policy
+	switch wal.syncPolicy {
+	case SyncAlways:
+		err := wal.activeSegment.file.Sync()
 		if err != nil {
 			return 0, err
 		}
-		return currentLSN, nil
+	case SyncOS:
+		// do nothing os handles the sync
+	case SyncEverySec:
+		//do nothing TODO: separate background functon to handle this sync
 	}
-	//append to the segment file if filesize < 64mb
-	wal.activeSegment.append(recordWrapperBytes)
-	// write bytes to segment
 	return currentLSN, nil
 }
 
@@ -241,20 +247,25 @@ func (wal *WAL) AppendDelete(extID string, intID uint64) (uint64, error) {
 		if err != nil {
 			return 0, err
 		}
-		//write the record to new active segment file
-		_, err = wal.activeSegment.append(recordWrapperBytes)
+	}
+	wal.activeSegment.append(recordWrapperBytes)
+	// write bytes to disk
+	switch wal.syncPolicy {
+	case SyncAlways:
+		err := wal.activeSegment.file.Sync()
 		if err != nil {
 			return 0, err
 		}
-		return currentLSN, nil
+	case SyncOS:
+		//do nothing OS handles
+	case SyncEverySec:
+		//Todo backgorund go rouine to handle sync every sec
+
 	}
-	//append to the segment file if filesize < 64mb
-	wal.activeSegment.append(recordWrapperBytes)
-	// write bytes to segment
 	return currentLSN, nil
 }
 
-// Create  new active segment file with current segID and segmentheader
+// Create  new active segment file with new segID and writes SegmentHeader
 func (wal *WAL) rotateSegment() error {
 	// change current semgnent file to readOnly
 	wal.activeSegment.file.Chmod(0444)
@@ -282,7 +293,7 @@ func (wal *WAL) rotateSegment() error {
 }
 
 // This implements the standard io.Closer interface.
-// go garbage collector doesn't clean OS resources so implement close for structures that hold os resources
+// go garbage collector doesn't clean OS resources so implement close for structures that hold OS resources
 func (wal *WAL) Close() error {
 	wal.mu.Lock()
 	defer wal.mu.Unlock()
