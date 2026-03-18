@@ -1,11 +1,14 @@
 package collection
 
 import (
-	"github.com/Kasbe14/Dattaniddhi/internal/index"
-	"github.com/Kasbe14/Dattaniddhi/internal/types"
-	"github.com/Kasbe14/Dattaniddhi/internal/vector"
+	"encoding/json"
 	"errors"
 	"sync"
+
+	"github.com/Kasbe14/Dattaniddhi/internal/index"
+	"github.com/Kasbe14/Dattaniddhi/internal/store/wal"
+	"github.com/Kasbe14/Dattaniddhi/internal/types"
+	"github.com/Kasbe14/Dattaniddhi/internal/vector"
 
 	"github.com/google/uuid"
 )
@@ -21,6 +24,7 @@ type Collection struct {
 	intToExt map[int]string
 	//  Playload in-memory
 	payload map[string]any
+	wal     *wal.WAL
 }
 
 type Result struct {
@@ -28,7 +32,7 @@ type Result struct {
 	Score float64
 }
 
-func NewCollection(cfg CollectionConfig) (*Collection, error) {
+func NewCollection(cfg CollectionConfig, wal *wal.WAL) (*Collection, error) {
 	if cfg.Dimension <= 0 {
 		return nil, ErrInvalidDimension
 	}
@@ -66,6 +70,7 @@ func NewCollection(cfg CollectionConfig) (*Collection, error) {
 		extToInt:  make(map[string]int),
 		intToExt:  make(map[int]string),
 		payload:   make(map[string]any),
+		wal:       wal,
 	}, nil
 }
 
@@ -89,6 +94,17 @@ func (c *Collection) Insert(vecVals []float32, payload any) (string, error) {
 	c.extToInt[externalID] = internalID
 	c.intToExt[internalID] = externalID
 
+	//serialise the payload data as metaData
+	//Note - json.Marshal ingores the unexported struct fields
+	metaData, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	//writng to the wal segment file
+	_, err = c.wal.AppendInsert(externalID, uint64(internalID), vecVals, metaData)
+	if err != nil {
+		return "", err
+	}
 	//Add vector to index
 	added, err := c.index.Add(internalID, vector)
 	//rollback if id exist internal courruption
@@ -136,7 +152,12 @@ func (c *Collection) Delete(id string) error {
 	if !ok {
 		return ErrNotFound
 	}
-	err := c.index.Delete(internalID)
+	// write/append operation to the Wal segment
+	_, err := c.wal.AppendDelete(id, uint64(internalID))
+	if err != nil {
+		return err
+	}
+	err = c.index.Delete(internalID)
 	if err != nil {
 		return err
 	}
