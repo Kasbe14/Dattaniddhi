@@ -15,3 +15,7 @@ Thumbs.db
 #gpt coding sessions index
 sessions_index.txt
 wal_curent.txt
+
+MeargeGoFiles.ps1
+
+gen_context.ps1
