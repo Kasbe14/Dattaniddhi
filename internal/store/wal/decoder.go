@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"math"
 )
 
 func decodeRecordHeader(rhBytes []byte) (*recordHeader, error) {
@@ -52,4 +53,90 @@ func isValidOptype(op uint8) bool {
 	default:
 		return false
 	}
+}
+
+func insertPayloadDecoder(plBytes []byte) (*insertPayload, error) {
+
+	//read size of the external id string
+	offset := 0
+	if len(plBytes) < 2 {
+		return nil, fmt.Errorf("corrupted payload: incomplete external id length")
+	}
+	extIDLen := binary.LittleEndian.Uint16(plBytes)
+	offset += 2
+
+	//read the external id string
+	if offset+int(extIDLen) > len(plBytes) {
+		return nil, fmt.Errorf("corrupted payload : incomplete external id")
+	}
+	extID := string(bytes.Clone(plBytes[offset : offset+int(extIDLen)]))
+	offset += int(extIDLen)
+	//read internal id
+	if offset+8 > len(plBytes) {
+		return nil, fmt.Errorf("corrupted payload : incomplete internal id")
+	}
+	intID := binary.LittleEndian.Uint64(plBytes[offset:])
+	offset += 8
+	//read vector size
+	if offset+4 > len(plBytes) {
+		return nil, fmt.Errorf("corrupted payload: incomplete vector size")
+	}
+	vectorDimension := binary.LittleEndian.Uint32(plBytes[offset:])
+	offset += 4
+	// create and read vector values
+	vectorData := make([]float32, vectorDimension)
+	var i uint32
+	for i = 0; i < (vectorDimension); i++ {
+		//converting uint32 bit to float32
+		if offset+4 > len(plBytes) {
+			return nil, fmt.Errorf("corrupted payload : incomplete vector values")
+		}
+		vectorData[i] = math.Float32frombits(binary.LittleEndian.Uint32(plBytes[offset:]))
+		offset += 4
+	}
+	if offset+4 > len(plBytes) {
+		return nil, fmt.Errorf("corrupted payload: incorrect meta data size")
+	}
+	metaDataSize := binary.LittleEndian.Uint32(plBytes[offset:])
+	offset += 4
+	// TODO : meta data is stored as bytes so check how to represent it ?
+	metaDataBytes := make([]byte, metaDataSize)
+	if offset+int(metaDataSize) > len(plBytes) {
+		return nil, fmt.Errorf("corrupted payload : incomplete metadata")
+	}
+	copy(metaDataBytes, plBytes[offset:offset+int(metaDataSize)])
+	offset += int(metaDataSize)
+	return &insertPayload{
+		externalID: extID,
+		internalID: intID,
+		vectorData: vectorData,
+		metaData:   metaDataBytes,
+	}, nil
+}
+
+func deletePayloadDecoder(plBytes []byte) (*deletePayload, error) {
+	offset := 0
+	//read external id length
+	if len(plBytes) < 2 {
+		return nil, fmt.Errorf("corrupted payload: incomplete external id length")
+	}
+	extIDLen := binary.LittleEndian.Uint16(plBytes)
+	offset += 2
+	//read external id string
+	if offset+int(extIDLen) > len(plBytes) {
+		return nil, fmt.Errorf("corrupted payload: incomplete external id")
+	}
+	extID := string(bytes.Clone(plBytes[offset : offset+int(extIDLen)]))
+	offset += int(extIDLen)
+
+	//read internal id
+	if offset+8 > len(plBytes) {
+		return nil, fmt.Errorf("corrupted payload: incomplete internal id")
+	}
+	intId := binary.LittleEndian.Uint64(plBytes[offset:])
+
+	return &deletePayload{
+		externalID: extID,
+		internalID: intId,
+	}, nil
 }
