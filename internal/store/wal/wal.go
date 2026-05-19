@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 type SyncPolicy int
@@ -32,6 +33,8 @@ const (
 	walVersion uint8 = 1
 	//max segment file size 64mb
 	maxSegmentFileSize uint64 = 64 * 1024 * 1024
+	//minimum reocrd lenght 36 = record header 32byetes + checksum 4 bytes
+	minRecordLength = 36
 )
 
 // Orchestrator for the segment files and api for collections, Own by the database layer (not implemented yet)
@@ -42,6 +45,9 @@ type WAL struct {
 	lsn           uint64
 	segID         uint64
 	syncPolicy    SyncPolicy
+	//  Graceful shutdown/ go rouint elifecylc management
+	//done        chan struct{} //signal to stop background sync
+	//wg          sync.WaitGroup // to wait for the routine to finish before closing the wal
 }
 
 func NewWAL(dir string, sp SyncPolicy) (*WAL, error) {
@@ -91,13 +97,19 @@ func NewWAL(dir string, sp SyncPolicy) (*WAL, error) {
 		//update the current size of the segment file
 		activeSeg.currentSize += uint64(bytesWritten)
 	}
-	return &WAL{
+	newWal := &WAL{
 		dir:           dir,
 		activeSegment: activeSeg,
 		lsn:           lsn,
 		segID:         segID,
 		syncPolicy:    sp,
-	}, nil
+	}
+	// only one go rouinte per wal instance
+	if sp == SyncEverySec {
+		go newWal.backgroundSync()
+	}
+	return newWal, nil
+
 }
 
 // helper function to scan segment file and return latest (highest) segId
@@ -307,3 +319,13 @@ func (wal *WAL) Close() error {
 }
 
 // TODO : update operation uisng delete and insert 2 operations for now later crate and update payload
+
+// background go routine for SyncEverySec fsync policy
+func (wal *WAL) backgroundSync() {
+	ticker := time.NewTicker(time.Second)
+	for range ticker.C {
+		wal.mu.Lock()
+		wal.activeSegment.file.Sync()
+		wal.mu.Unlock()
+	}
+}
