@@ -7,6 +7,27 @@ import (
 	"math"
 )
 
+func decodeSegmentHeader(shBytes []byte) (*segmentHeader, error) {
+	if len(shBytes) != segmentHeaderByteSize {
+		return nil, fmt.Errorf("corrupt segment header : incomplete segment header")
+	}
+	//magic byte check
+	if !bytes.Equal(shBytes[0:7], []byte(magicBytes)) {
+		return nil, fmt.Errorf("corrupted segment: invalid magic byte")
+	}
+	//wal version chek
+	version := shBytes[7]
+	if version != walVersion {
+		return nil, fmt.Errorf("corrupted segment: invalid wal version")
+	}
+	segID := binary.LittleEndian.Uint64(shBytes[8:])
+
+	return &segmentHeader{
+		version:   version,
+		segmentID: segID,
+	}, nil
+}
+
 func decodeRecordHeader(rhBytes []byte) (*recordHeader, error) {
 	//check record header byte length 32bytes
 	if len(rhBytes) != int(recordHeaderByteSize) {
@@ -55,7 +76,7 @@ func isValidOptype(op uint8) bool {
 	}
 }
 
-func insertPayloadDecoder(plBytes []byte) (*insertPayload, error) {
+func decodeInsertPayload(plBytes []byte) (*insertPayload, error) {
 
 	//read size of the external id string
 	offset := 0
@@ -114,7 +135,7 @@ func insertPayloadDecoder(plBytes []byte) (*insertPayload, error) {
 	}, nil
 }
 
-func deletePayloadDecoder(plBytes []byte) (*deletePayload, error) {
+func decodeDeletePayload(plBytes []byte) (*deletePayload, error) {
 	offset := 0
 	//read external id length
 	if len(plBytes) < 2 {
@@ -140,3 +161,14 @@ func deletePayloadDecoder(plBytes []byte) (*deletePayload, error) {
 		internalID: intId,
 	}, nil
 }
+
+func decodeCheckSumCrc32(chBytes []byte) (uint32, error) {
+	if len(chBytes) != 4 {
+		return 0, fmt.Errorf("corrupt checksum : incomplete checksum")
+	}
+	checksum := binary.LittleEndian.Uint32(chBytes)
+	return checksum, nil
+}
+
+//TODO : update Operation and format
+//func decodeUpdatePayload(plByte []byte) (*updatePayload, error)

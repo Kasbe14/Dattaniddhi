@@ -77,7 +77,7 @@ func TestInsertPayloadDecoder(t *testing.T) {
 	encodedBytes := original.encode()
 
 	t.Run("Success: Valid Insert Payload", func(t *testing.T) {
-		decoded, err := insertPayloadDecoder(encodedBytes)
+		decoded, err := decodeInsertPayload(encodedBytes)
 		if err != nil {
 			t.Fatalf("Unexpected error: %v", err)
 		}
@@ -107,7 +107,7 @@ func TestInsertPayloadDecoder(t *testing.T) {
 		}
 
 		for _, truncateLen := range truncations {
-			_, err := insertPayloadDecoder(encodedBytes[:truncateLen])
+			_, err := decodeInsertPayload(encodedBytes[:truncateLen])
 			if err == nil {
 				t.Errorf("Expected error when payload is truncated to %d bytes", truncateLen)
 			}
@@ -126,7 +126,7 @@ func TestDeletePayloadDecoder(t *testing.T) {
 	encodedBytes := original.encode()
 
 	t.Run("Success: Valid Delete Payload", func(t *testing.T) {
-		decoded, err := deletePayloadDecoder(encodedBytes)
+		decoded, err := decodeDeletePayload(encodedBytes)
 		if err != nil {
 			t.Fatalf("Unexpected error: %v", err)
 		}
@@ -141,9 +141,55 @@ func TestDeletePayloadDecoder(t *testing.T) {
 
 	t.Run("Failure: Truncated Delete Bytes", func(t *testing.T) {
 		// Try parsing a slice that is missing its last byte
-		_, err := deletePayloadDecoder(encodedBytes[:len(encodedBytes)-1])
+		_, err := decodeDeletePayload(encodedBytes[:len(encodedBytes)-1])
 		if err == nil {
 			t.Error("Expected error for truncated delete payload, got nil")
+		}
+	})
+}
+
+// -----------------------------------------------------------------------------
+// Test: Segment Header Decoder
+// -----------------------------------------------------------------------------
+func TestDecodeSegmentHeader(t *testing.T) {
+	validHeader := newSegmentHeader(walVersion, 42)
+	validBytes := encodeSegmentHeader(*validHeader)
+
+	t.Run("Success: Valid Segment Header", func(t *testing.T) {
+		decoded, err := decodeSegmentHeader(validBytes)
+		if err != nil {
+			t.Fatalf("Unexpected error: %v", err)
+		}
+		if decoded.version != walVersion {
+			t.Errorf("Expected version %d, got %d", walVersion, decoded.version)
+		}
+		if decoded.segmentID != 42 {
+			t.Errorf("Expected segmentID 42, got %d", decoded.segmentID)
+		}
+	})
+
+	t.Run("Failure: Invalid Length", func(t *testing.T) {
+		_, err := decodeSegmentHeader(validBytes[:10]) // Cut short
+		if err == nil {
+			t.Error("Expected error for invalid byte size, got nil")
+		}
+	})
+
+	t.Run("Failure: Corrupted Magic Bytes", func(t *testing.T) {
+		badMagic := bytes.Clone(validBytes)
+		badMagic[0] = 'X'
+		_, err := decodeSegmentHeader(badMagic)
+		if err == nil || err.Error() != "corrupted segment: invalid magic byte" {
+			t.Errorf("Expected magic byte error, got: %v", err)
+		}
+	})
+
+	t.Run("Failure: Invalid Version", func(t *testing.T) {
+		badVersion := bytes.Clone(validBytes)
+		badVersion[7] = 99
+		_, err := decodeSegmentHeader(badVersion)
+		if err == nil {
+			t.Error("Expected error for invalid version, got nil")
 		}
 	})
 }
