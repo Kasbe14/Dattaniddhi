@@ -7,10 +7,14 @@ import (
 	"io"
 )
 
+// data required for recovery
 type DecodedRecords struct {
-	recordHeader  *recordHeader
-	payload       any
-	checksumCrc32 uint32
+	LSN      uint64
+	OpType   uint8
+	ExtID    string
+	IntID    uint64
+	Vector   []float32 // Only populated for Inserts
+	MetaData []byte    // Only populated for Inserts
 }
 
 // scans all the segment files validates and returns the records written to the segment file
@@ -34,6 +38,7 @@ func scanSegmentFile(segment *segment) ([]DecodedRecords, error) {
 	offset = int64(segmentHeaderByteSize)
 	//Scanner loop
 	for offset < (segmentFileSize) {
+		var singleRecord DecodedRecords
 		// RecordHeader Scanning and decoding
 		if offset+32 > (segmentFileSize) {
 			//torn write
@@ -52,6 +57,8 @@ func scanSegmentFile(segment *segment) ([]DecodedRecords, error) {
 			return nil, err
 		}
 		recordLenght := decodedRecordHeader.recordLength
+		singleRecord.LSN = decodedRecordHeader.lsn
+		singleRecord.OpType = decodedRecordHeader.opType
 		// Payload and checksum Scanning and decoding
 		if offset+int64(recordLenght) > segmentFileSize {
 			// torn write
@@ -74,29 +81,32 @@ func scanSegmentFile(segment *segment) ([]DecodedRecords, error) {
 			return nil, fmt.Errorf("corupt data : invalid checksum")
 		}
 		//decoding payload bytes
-		var decodedPayloadBytes any
+		//var decodedPayloadBytes any
 		switch decodedRecordHeader.opType {
 		case OpInsert:
-			decodedPayloadBytes, err = decodeInsertPayload(payloadBytes)
+			decodedPayloadBytes, err := decodeInsertPayload(payloadBytes)
 			if err != nil {
 				return nil, err
 			}
+			singleRecord.ExtID = decodedPayloadBytes.externalID
+			singleRecord.IntID = decodedPayloadBytes.internalID
+			singleRecord.Vector = decodedPayloadBytes.vectorData
+			singleRecord.MetaData = decodedPayloadBytes.metaData
+
 		case OpDelete:
-			decodedPayloadBytes, err = decodeDeletePayload(payloadBytes)
+			decodedPayloadBytes, err := decodeDeletePayload(payloadBytes)
 			if err != nil {
 				return nil, err
 			}
+			singleRecord.ExtID = decodedPayloadBytes.externalID
+			singleRecord.IntID = decodedPayloadBytes.internalID
 			//TODO : update operation ,format, payload , deocode
 			/*case OpDelete:
 			decodedPayloadBytes, err = decodeUpdatePayload(payloadBytes)*/
 		default:
 			return nil, fmt.Errorf("invalid Operation type")
 		}
-		records = append(records, DecodedRecords{
-			recordHeader:  decodedRecordHeader,
-			payload:       decodedPayloadBytes,
-			checksumCrc32: storedCrc32,
-		})
+		records = append(records, singleRecord)
 		offset += int64(recordLenght)
 	}
 	return records, nil
