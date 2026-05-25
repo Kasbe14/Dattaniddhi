@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -31,32 +32,40 @@ func setupMockSegment(t *testing.T, data []byte) *segment {
 }
 
 func TestScanSegmentFile(t *testing.T) {
-	// 1. Prepare Valid Data blocks
+	// -------------------------------------------------------------------------
+	// 1. Prepare Valid Mock Data Blocks
+	// -------------------------------------------------------------------------
 	segHeaderBytes := encodeSegmentHeader(*newSegmentHeader(walVersion, 1))
 
-	mockInsertPayload := &insertPayload{
-		externalID: "doc-1",
+	// Mock Insert Record
+	mockInsert := &insertPayload{
+		externalID: "doc-alpha",
 		internalID: 100,
-		vectorData: []float32{1.0, 2.0},
-		metaData:   []byte(`{"test":"meta"}`),
+		vectorData: []float32{1.5, -2.5},
+		metaData:   []byte(`{"color":"red"}`),
 	}
 	insertRecHeader := newRecordHeader(walVersion, 1, OpInsert)
-	insertWrapper := newRecordWrapper(*insertRecHeader, mockInsertPayload.encode())
+	insertWrapper := newRecordWrapper(*insertRecHeader, mockInsert.encode())
 	insertBytes := insertWrapper.encode()
 
-	mockDeletePayload := &deletePayload{
-		externalID: "doc-1",
-		internalID: 100,
+	// Mock Delete Record
+	mockDelete := &deletePayload{
+		externalID: "doc-beta",
+		internalID: 200,
 	}
 	deleteRecHeader := newRecordHeader(walVersion, 2, OpDelete)
-	deleteWrapper := newRecordWrapper(*deleteRecHeader, mockDeletePayload.encode())
+	deleteWrapper := newRecordWrapper(*deleteRecHeader, mockDelete.encode())
 	deleteBytes := deleteWrapper.encode()
 
-	// Combine into a valid file layout
+	// Combine into a valid file layout (Header -> Insert -> Delete)
 	var validFileBytes []byte
 	validFileBytes = append(validFileBytes, segHeaderBytes...)
 	validFileBytes = append(validFileBytes, insertBytes...)
 	validFileBytes = append(validFileBytes, deleteBytes...)
+
+	// -------------------------------------------------------------------------
+	// 2. Test Cases
+	// -------------------------------------------------------------------------
 
 	t.Run("Success: Happy Path", func(t *testing.T) {
 		seg := setupMockSegment(t, validFileBytes)
@@ -72,20 +81,30 @@ func TestScanSegmentFile(t *testing.T) {
 		}
 
 		// Verify Record 1 (Insert)
-		if records[0].recordHeader.lsn != 1 || records[0].recordHeader.opType != OpInsert {
+		rec1 := records[0]
+		if rec1.LSN != 1 || rec1.OpType != OpInsert {
 			t.Errorf("First record header mismatch")
 		}
-		// Go type assertion to check if payload was decoded into correct struct
-		if _, ok := records[0].payload.(*insertPayload); !ok {
-			t.Errorf("Expected payload to be *insertPayload")
+		if rec1.ExtID != "doc-alpha" || rec1.IntID != 100 {
+			t.Errorf("Insert IDs mismatch: got Ext:%s Int:%d", rec1.ExtID, rec1.IntID)
+		}
+		if !reflect.DeepEqual(rec1.Vector, []float32{1.5, -2.5}) {
+			t.Errorf("Insert Vector mismatch: got %v", rec1.Vector)
+		}
+		if !reflect.DeepEqual(rec1.MetaData, []byte(`{"color":"red"}`)) {
+			t.Errorf("Insert Metadata mismatch: got %s", rec1.MetaData)
 		}
 
 		// Verify Record 2 (Delete)
-		if records[1].recordHeader.lsn != 2 || records[1].recordHeader.opType != OpDelete {
+		rec2 := records[1]
+		if rec2.LSN != 2 || rec2.OpType != OpDelete {
 			t.Errorf("Second record header mismatch")
 		}
-		if _, ok := records[1].payload.(*deletePayload); !ok {
-			t.Errorf("Expected payload to be *deletePayload")
+		if rec2.ExtID != "doc-beta" || rec2.IntID != 200 {
+			t.Errorf("Delete IDs mismatch: got Ext:%s Int:%d", rec2.ExtID, rec2.IntID)
+		}
+		if rec2.Vector != nil || rec2.MetaData != nil {
+			t.Errorf("Delete record should not have vector or metadata populated")
 		}
 	})
 
@@ -104,6 +123,7 @@ func TestScanSegmentFile(t *testing.T) {
 
 	t.Run("Recovery: Torn Write (Header Cut Off)", func(t *testing.T) {
 		// Cut the file halfway through the Insert Record's header
+		// (16 byte segment header + 10 bytes of the 32 byte record header)
 		tornHeaderBytes := validFileBytes[:segmentHeaderByteSize+10]
 		seg := setupMockSegment(t, tornHeaderBytes)
 		defer seg.file.Close()
@@ -112,6 +132,7 @@ func TestScanSegmentFile(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Expected graceful recovery, got error: %v", err)
 		}
+		// It should silently ignore the torn write and return 0 valid records
 		if len(records) != 0 {
 			t.Errorf("Expected 0 valid records recovered, got %d", len(records))
 		}
@@ -119,6 +140,7 @@ func TestScanSegmentFile(t *testing.T) {
 
 	t.Run("Recovery: Torn Write (Payload Cut Off)", func(t *testing.T) {
 		// Cut the file halfway through the Insert Record's payload
+		// (16 byte seg header + 32 byte rec header + 5 bytes of payload)
 		tornPayloadBytes := validFileBytes[:segmentHeaderByteSize+recordHeaderByteSize+5]
 		seg := setupMockSegment(t, tornPayloadBytes)
 		defer seg.file.Close()
@@ -127,6 +149,7 @@ func TestScanSegmentFile(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Expected graceful recovery, got error: %v", err)
 		}
+		// It should silently ignore the torn write and return 0 valid records
 		if len(records) != 0 {
 			t.Errorf("Expected 0 valid records recovered, got %d", len(records))
 		}
@@ -134,8 +157,9 @@ func TestScanSegmentFile(t *testing.T) {
 
 	t.Run("Failure: Checksum Mismatch", func(t *testing.T) {
 		corruptedBytes := bytes.Clone(validFileBytes)
-		// Flip a byte deep inside the insert payload
-		corruptedBytes[segmentHeaderByteSize+recordHeaderByteSize+5] = 0xFF
+		// Flip a byte deep inside the insert payload (e.g., corrupt the vector data)
+		corruptIndex := segmentHeaderByteSize + recordHeaderByteSize + 5
+		corruptedBytes[corruptIndex] = 0xFF
 
 		seg := setupMockSegment(t, corruptedBytes)
 		defer seg.file.Close()
@@ -148,7 +172,7 @@ func TestScanSegmentFile(t *testing.T) {
 
 	t.Run("Failure: Corrupted Segment Header", func(t *testing.T) {
 		corruptedHeader := bytes.Clone(validFileBytes)
-		corruptedHeader[0] = 'X' // Break magic byte
+		corruptedHeader[0] = 'X' // Break magic byte "SANGITA"
 
 		seg := setupMockSegment(t, corruptedHeader)
 		defer seg.file.Close()
