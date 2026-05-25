@@ -3,13 +3,13 @@ package collection
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/Kasbe14/Dattaniddhi/internal/index"
 	"github.com/Kasbe14/Dattaniddhi/internal/store/wal"
 	"github.com/Kasbe14/Dattaniddhi/internal/types"
 	"github.com/Kasbe14/Dattaniddhi/internal/vector"
-
 	"github.com/google/uuid"
 )
 
@@ -63,6 +63,7 @@ func NewCollection(cfg CollectionConfig, wal *wal.WAL) (*Collection, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	return &Collection{
 		config:    cfg,
 		index:     idx,
@@ -77,48 +78,58 @@ func NewCollection(cfg CollectionConfig, wal *wal.WAL) (*Collection, error) {
 func (c *Collection) Insert(vecVals []float32, payload any) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	// 1. Validation phase (Fails fast, no state changed)
 	if len(vecVals) != c.config.Dimension {
 		return "", ErrInvalidDimension
 	}
-	//Constructing the vector
 	vector, err := vector.NewVector(vecVals, c.config.Dimension)
 	if err != nil {
 		return "", err
 	}
-	//generate external id
-	externalID := uuid.NewString()
-	//internal id and total vector add in index ever
-	c.idCounter += 1
-	internalID := c.idCounter
-	//storing and mapping ids
-	c.extToInt[externalID] = internalID
-	c.intToExt[internalID] = externalID
-
-	//serialise the payload data as metaData
-	//Note - json.Marshal ingores the unexported struct fields
 	metaData, err := json.Marshal(payload)
 	if err != nil {
 		return "", err
 	}
-	//writng to the wal segment file
+
+	// 2. Prepare data (Still no state permanently changed)
+	externalID := uuid.NewString()
+	// Calculate the NEXT internal ID, but don't commit it to c.idCounter yet!
+	internalID := c.idCounter + 1
+
+	// 3. The Point of No Return: Write to WAL
 	_, err = c.wal.AppendInsert(externalID, uint64(internalID), vecVals, metaData)
 	if err != nil {
+		// If disk fails, we just return. No memory was mutated, so nothing to clean up!
 		return "", err
 	}
-	//Add vector to index
+
+	// 4. Memory Mutation (The WAL succeeded, now we update everything)
 	added, err := c.index.Add(internalID, vector)
-	//rollback if id exist internal courruption
-	if err != nil {
-		delete(c.extToInt, externalID)
-		delete(c.intToExt, internalID)
-		return "", err
-	}
-	if added {
-		delete(c.extToInt, externalID)
-		delete(c.intToExt, internalID)
+	if err != nil || !added {
+		// CRITICAL EDGE CASE: If the WAL succeeded but the memory index fails,
+		// the DB is now in an inconsistent state.
+		// You must append a compensation record (Delete) to the WAL to cancel it out!
+		_, walErr := c.wal.AppendDelete(externalID, uint64(internalID))
+		if walErr != nil {
+			// If appending the delete fails, the disk is truly in a bad state.
+			// Standard databases would trigger a panic or safe shutdown here.
+			return "", fmt.Errorf("index failed: %v, critical wal rollback failed: %v", err, walErr)
+		}
+
+		if err != nil {
+			return "", err
+		}
 		return "", ErrInternalIDCollision
 	}
+
+	// 5. Finalize State
+	// The index succeeded, so we finally commit the ID counter and maps
+	c.idCounter = internalID
+	c.extToInt[externalID] = internalID
+	c.intToExt[internalID] = externalID
 	c.payload[externalID] = payload
+
 	return externalID, nil
 }
 func (c *Collection) Search(queryVals []float32, k int) ([]Result, error) {
@@ -152,6 +163,7 @@ func (c *Collection) Delete(id string) error {
 	if !ok {
 		return ErrNotFound
 	}
+	//payload := c.payload // used for soft deletes tombstones(easeir rollback)
 	// write/append operation to the Wal segment
 	_, err := c.wal.AppendDelete(id, uint64(internalID))
 	if err != nil {
@@ -159,7 +171,9 @@ func (c *Collection) Delete(id string) error {
 	}
 	err = c.index.Delete(internalID)
 	if err != nil {
-		return err
+		// The disk and memory are now permanently out of sync.
+		// Solution: Crash the database immediately to prevent data corruption.
+		panic(fmt.Sprintf("FATAL: Index failed to delete %s, WAL out of sync: %v", id, err))
 	}
 	delete(c.extToInt, id)
 	delete(c.intToExt, internalID)
