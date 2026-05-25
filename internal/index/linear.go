@@ -61,13 +61,13 @@ func (li *LinearIndex) Add(id int, vec *v.Vector) (bool, error) {
 func (li *LinearIndex) Delete(id int) error {
 	li.mu.Lock()
 	defer li.mu.Unlock()
-	_, ok := li.vectors[id]
+	//delete is idempotent,
+	/*_, ok := li.vectors[id]
 	if !ok {
 		return errors.New("vector doesn't exist in index")
-	}
+	}*/
 	delete(li.vectors, id)
 	return nil
-
 }
 func (li *LinearIndex) Get(id int) (*v.Vector, bool) {
 	li.mu.RLock()
