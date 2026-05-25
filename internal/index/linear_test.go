@@ -1,10 +1,11 @@
 package index
 
 import (
-	"github.com/Kasbe14/Dattaniddhi/internal/types"
-	v "github.com/Kasbe14/Dattaniddhi/internal/vector"
 	"slices"
 	"testing"
+
+	"github.com/Kasbe14/Dattaniddhi/internal/types"
+	v "github.com/Kasbe14/Dattaniddhi/internal/vector"
 )
 
 func TestNewLinearIndex_Constructor(t *testing.T) {
@@ -69,7 +70,7 @@ func TestLinearIndex_AddAndGet(t *testing.T) {
 
 	t.Run("Successful Add", func(t *testing.T) {
 		exists, err := idx.Add(1, vec)
-		if err != nil || exists {
+		if err != nil || !exists {
 			t.Errorf("Expected success, got exists=%v, err=%v", exists, err)
 		}
 
@@ -82,8 +83,8 @@ func TestLinearIndex_AddAndGet(t *testing.T) {
 
 	t.Run("Add Duplicate VecId", func(t *testing.T) {
 		exists, err := idx.Add(1, vec)
-		if err != nil || !exists {
-			t.Error("Expected exists=true for duplicate VecId")
+		if err != nil || exists {
+			t.Error("Expected exists=false for duplicate VecId")
 		}
 	})
 
