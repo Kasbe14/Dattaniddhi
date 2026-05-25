@@ -1,14 +1,15 @@
 package index
 
 import (
-	"github.com/Kasbe14/Dattaniddhi/internal/types"
-	"github.com/Kasbe14/Dattaniddhi/internal/vector"
-	v "github.com/Kasbe14/Dattaniddhi/internal/vector"
 	"cmp"
 	"errors"
 	"fmt"
 	"slices"
 	"sync"
+
+	"github.com/Kasbe14/Dattaniddhi/internal/types"
+	"github.com/Kasbe14/Dattaniddhi/internal/vector"
+	v "github.com/Kasbe14/Dattaniddhi/internal/vector"
 )
 
 // Initial index state is empty, no dimension assigned, no lock
@@ -37,7 +38,7 @@ func (li *LinearIndex) Dimension() int {
 	return li.config.Dimension()
 }
 
-// Returns true if vector already exist else error
+// Returns false if vector already exist else error
 func (li *LinearIndex) Add(id int, vec *v.Vector) (bool, error) {
 	li.mu.Lock()
 	defer li.mu.Unlock()
@@ -52,10 +53,10 @@ func (li *LinearIndex) Add(id int, vec *v.Vector) (bool, error) {
 	}
 	_, ok := li.vectors[id]
 	if ok {
-		return true, nil
+		return false, nil
 	}
 	li.vectors[id] = vec
-	return false, nil
+	return true, nil
 }
 func (li *LinearIndex) Delete(id int) error {
 	li.mu.Lock()
