@@ -118,8 +118,8 @@ func TestLinearIndex_Delete(t *testing.T) {
 
 	t.Run("Delete Non-existent", func(t *testing.T) {
 		err := idx.Delete(5)
-		if err == nil {
-			t.Error("Expected error when deleting non-existent VecId")
+		if err != nil {
+			t.Errorf("Expected nil error (idempotent delete), got: %v", err)
 		}
 	})
 }
