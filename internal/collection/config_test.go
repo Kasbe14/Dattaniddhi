@@ -1,8 +1,11 @@
 package collection
 
 import (
-	"github.com/Kasbe14/Dattaniddhi/internal/types"
+	"os"
+	"path/filepath"
 	"testing"
+
+	"github.com/Kasbe14/Dattaniddhi/internal/types"
 )
 
 func TestNewCollectionConfig(t *testing.T) {
@@ -168,5 +171,56 @@ func TestNewCollectionConfig(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestConfig_Lifecycle_SaveAndLoad(t *testing.T) {
+	rootDir := t.TempDir()
+
+	originalCfg, _ := NewCollectionConfig(
+		"test_config", 128, types.Cosine, types.LinearIndex, types.Text, "test-model",
+	)
+
+	// Save
+	if err := saveConfig(originalCfg, rootDir); err != nil {
+		t.Fatalf("Failed to save config: %v", err)
+	}
+
+	// Load
+	loadedCfg, err := loadConfig(rootDir, "test_config")
+	if err != nil {
+		t.Fatalf("Failed to load config: %v", err)
+	}
+
+	// Verify equality
+	if loadedCfg.Name != originalCfg.Name || loadedCfg.Dimension != originalCfg.Dimension || loadedCfg.Version != originalCfg.Version {
+		t.Errorf("Config mismatch. Expected %+v, got %+v", originalCfg, loadedCfg)
+	}
+}
+
+func TestConfig_Load_MissingFails(t *testing.T) {
+	rootDir := t.TempDir()
+
+	_, err := loadConfig(rootDir, "ghost_collection")
+	if err == nil {
+		t.Fatal("Expected error when loading non-existent config, got nil")
+	}
+}
+
+func TestConfig_Load_Corruption(t *testing.T) {
+	rootDir := t.TempDir()
+	collName := "corrupted_coll"
+
+	// Create directory manually
+	collDir := filepath.Join(rootDir, collName)
+	os.MkdirAll(collDir, 0755)
+
+	// Write malformed JSON
+	configPath := filepath.Join(collDir, "config.json")
+	os.WriteFile(configPath, []byte(`{"Name": "corrupted_coll", "Dimension": "NOT_A_NUMBER"}`), 0644)
+
+	_, err := loadConfig(rootDir, collName)
+	if err == nil {
+		t.Fatal("Expected error when loading malformed JSON config, got nil")
 	}
 }
