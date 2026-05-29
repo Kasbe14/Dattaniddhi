@@ -8,14 +8,16 @@ import (
 )
 
 type segmentHeader struct {
-	version   uint8
-	segmentID uint64
+	//magic bytes 0-6
+	version   uint8  //7-8
+	segmentID uint64 // 9-16
 }
 
 type segment struct {
 	segID       uint64
 	file        *os.File
 	currentSize uint64
+	path        string
 }
 
 func newSegmentHeader(v uint8, segID uint64) *segmentHeader {
@@ -26,7 +28,7 @@ func newSegmentHeader(v uint8, segID uint64) *segmentHeader {
 }
 
 func encodeSegmentHeader(segHeader segmentHeader) []byte {
-	// 21 bytes buffer
+	// 16 bytes buffer
 	buf := make([]byte, segmentHeaderByteSize)
 
 	// Assing magic bytes to the buf go -> []bytes("string")
@@ -57,7 +59,7 @@ func createSegment(dirPath string, id uint64) (*segment, error) {
 	// Calling kernel for file
 	file, err := os.OpenFile(fullPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to open new segment %d: %w", id, err)
 	}
 	return &segment{
 		segID:       id,
@@ -73,7 +75,7 @@ func openExistingSegment(dirPath string, id uint64) (*segment, error) {
 		return nil, fmt.Errorf("WAL directory doesn't exists %s", dirPath)
 	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read WAL directory %s: %w", dirPath, err)
 	}
 	if !info.IsDir() {
 		return nil, fmt.Errorf("path exists but is not a directory %s", dirPath)
@@ -85,11 +87,13 @@ func openExistingSegment(dirPath string, id uint64) (*segment, error) {
 	// existing file open only for read and writing
 	file, err := os.OpenFile(fullPath, os.O_APPEND|os.O_RDWR, 0644)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to open the existing segment %d: %w", id, err)
 	}
 	fileInfo, err := file.Stat()
 	if err != nil {
-		return nil, err
+		//fix : closing the file descriptor if failed to process
+		file.Close()
+		return nil, fmt.Errorf("failed to stat existing segment %d: %w", id, err)
 	}
 	return &segment{
 		segID:       id,
@@ -102,7 +106,7 @@ func openExistingSegment(dirPath string, id uint64) (*segment, error) {
 func (s *segment) append(data []byte) (int, error) {
 	n, err := s.file.Write(data)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("failed to write to the segment %d: %w", s.segID, err)
 	}
 	s.currentSize += uint64(n)
 	return n, nil
