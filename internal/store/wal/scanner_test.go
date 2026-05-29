@@ -165,7 +165,7 @@ func TestScanSegmentFile(t *testing.T) {
 		defer seg.file.Close()
 
 		_, err := scanSegmentFile(seg)
-		if err == nil || err.Error() != "corupt data : invalid checksum" {
+		if err == nil || err.Error() != "corupt data: invalid checksum" {
 			t.Fatalf("Expected invalid checksum error, got: %v", err)
 		}
 	})
