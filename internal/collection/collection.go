@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/Kasbe14/Dattaniddhi/internal/index"
@@ -12,6 +14,9 @@ import (
 	"github.com/Kasbe14/Dattaniddhi/internal/vector"
 	"github.com/google/uuid"
 )
+
+var ErrCollectionAlreadyExists = errors.New("collection already exists")
+var ErrCollectionNotFound = errors.New("collection not found")
 
 // collection owns index and its lifecyle ensures collection level invariants
 type Collection struct {
@@ -32,7 +37,9 @@ type Result struct {
 	Score float64
 }
 
-func NewCollection(cfg CollectionConfig, wal *wal.WAL) (*Collection, error) {
+//rootDir should belong to future DB object
+
+func CreateCollection(cfg CollectionConfig, rootDir string, sync wal.SyncPolicy) (*Collection, error) {
 	if cfg.Dimension <= 0 {
 		return nil, ErrInvalidDimension
 	}
@@ -51,20 +58,39 @@ func NewCollection(cfg CollectionConfig, wal *wal.WAL) (*Collection, error) {
 	default:
 		return nil, ErrInvalidIndexType
 	}
+	cfgPath := filepath.Join(rootDir /*dbName*/, cfg.Name, "config.json")
+	_, err := os.Stat(cfgPath)
+	if !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("failed to stat config file")
+	}
+	if err == nil {
+		return nil, ErrCollectionAlreadyExists
+	}
+	//assigning the version
+	cfg.Version = collectionConfigVersion
+	err = saveConfig(cfg, rootDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create collection %w", err)
+	}
 	indexConfig, err := index.NewIndexConfig(cfg.IndexType, cfg.Metric, cfg.Dimension)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("index config creation failed: %w", err)
 	}
 	//pointer value satisfying IndexFactory interface
-	//indexFactory := &index.DefaultIndexFactory{}
 	var indexFactory index.DefaultIndexFactory
 	//return new index instance of type cfg.IndexType
 	idx, err := indexFactory.CreateIndex(indexConfig)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("index creation failed: %w", err)
 	}
-
-	return &Collection{
+	//create wal instance for the collection
+	walPath := filepath.Join(rootDir /*,dbName*/, cfg.Name, "wal")
+	wal, err := wal.NewWAL(walPath, sync)
+	if err != nil {
+		//wal.Close()
+		return nil, fmt.Errorf("failed to create collection: %w", err)
+	}
+	collection := &Collection{
 		config:    cfg,
 		index:     idx,
 		idCounter: 0,
@@ -72,7 +98,55 @@ func NewCollection(cfg CollectionConfig, wal *wal.WAL) (*Collection, error) {
 		intToExt:  make(map[int]string),
 		payload:   make(map[string]any),
 		wal:       wal,
-	}, nil
+	}
+	return collection, nil
+}
+
+func OpenCollection(rootDir /*dbName*/, collectionName string, sync wal.SyncPolicy) (*Collection, error) {
+	collectionConfig, err := loadConfig(rootDir, collectionName)
+	if errors.Is(err, ErrCollectionNotFound) {
+		return nil, err
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to open collection [%s]: %w", collectionName, err)
+	}
+
+	indexConfig, err := index.NewIndexConfig(collectionConfig.IndexType, collectionConfig.Metric, collectionConfig.Dimension)
+	if err != nil {
+		return nil, fmt.Errorf("index config creation failed: %w", err)
+	}
+	//pointer value satisfying IndexFactory interface
+	//indexFactory := &index.DefaultIndexFactory{}
+	var indexFactory index.DefaultIndexFactory
+	//return new index instance of type cfg.IndexType
+	idx, err := indexFactory.CreateIndex(indexConfig)
+	if err != nil {
+		return nil, fmt.Errorf("index creation failed: %w", err)
+	}
+
+	walPath := filepath.Join(rootDir /*,dbName*/, collectionName, "wal")
+	wal, err := wal.NewWAL(walPath, sync)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open collection [%s]: %w", collectionName, err)
+	}
+
+	collection := &Collection{
+		config:    *collectionConfig,
+		index:     idx,
+		idCounter: 0,
+		extToInt:  make(map[string]int),
+		intToExt:  make(map[int]string),
+		payload:   make(map[string]any),
+		wal:       wal,
+	}
+	//Loading the collection if exist else return new empty instance
+	err = collection.LoadState()
+	if err != nil {
+		//closing the wal so no leak/ghost wal remains
+		wal.Close()
+		return nil, fmt.Errorf("failed to open the collection %s: %w", collection.config.Name, err)
+	}
+	return collection, nil
 }
 
 func (c *Collection) Insert(vecVals []float32, payload any) (string, error) {
@@ -185,4 +259,29 @@ func (c *Collection) Get(id string) (any, bool) {
 	defer c.mu.RUnlock()
 	payload, ok := c.payload[id]
 	return payload, ok
+}
+
+func (c *Collection) GetIdCounter() int {
+	return c.idCounter
+}
+
+// Close safely shuts down the underlying storage engine and flushes to disk.
+func (c *Collection) Close() error {
+	if c.wal != nil {
+		return c.wal.Close()
+	}
+	return nil
+}
+
+//helper functions
+
+func (c *Collection) IDCounter() int {
+	return c.idCounter
+}
+func (c *Collection) ExtToInt() map[string]int {
+	return c.extToInt
+}
+
+func (c *Collection) IntToExt() map[int]string {
+	return c.intToExt
 }
