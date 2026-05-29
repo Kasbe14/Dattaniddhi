@@ -9,7 +9,7 @@ import (
 
 func decodeSegmentHeader(shBytes []byte) (*segmentHeader, error) {
 	if len(shBytes) != segmentHeaderByteSize {
-		return nil, fmt.Errorf("corrupt segment header : incomplete segment header")
+		return nil, fmt.Errorf("corrupt segment header: incomplete segment header")
 	}
 	//magic byte check
 	if !bytes.Equal(shBytes[0:7], []byte(magicBytes)) {
@@ -48,7 +48,7 @@ func decodeRecordHeader(rhBytes []byte) (*recordHeader, error) {
 	}
 	//version check
 	if rh.version != walVersion {
-		return nil, fmt.Errorf("unsupported wal version : %d", rh.version)
+		return nil, fmt.Errorf("unsupported wal version: %d", rh.version)
 	}
 	//optype check
 	if !isValidOptype(rh.opType) {
@@ -57,10 +57,10 @@ func decodeRecordHeader(rhBytes []byte) (*recordHeader, error) {
 	//sanity check record lenght
 	// record length min-> 36 max-> segment file size 64mb
 	if rh.recordLength < minRecordLength {
-		return nil, fmt.Errorf("corrupted record : length %d, too small", rh.recordLength)
+		return nil, fmt.Errorf("corrupted record: length %d, too small", rh.recordLength)
 	}
 	if uint64(rh.recordLength) > maxSegmentFileSize {
-		return nil, fmt.Errorf("corrupted record : length %d, exceeds max segment file size", rh.recordLength)
+		return nil, fmt.Errorf("corrupted record: length %d, exceeds max segment file size", rh.recordLength)
 	}
 
 	return rh, nil
@@ -123,7 +123,7 @@ func decodeInsertPayload(plBytes []byte) (*insertPayload, error) {
 	// TODO : meta data is stored as bytes so check how to represent it ?
 	metaDataBytes := make([]byte, metaDataSize)
 	if offset+int(metaDataSize) > len(plBytes) {
-		return nil, fmt.Errorf("corrupted payload : incomplete metadata")
+		return nil, fmt.Errorf("corrupted payload: incomplete metadata")
 	}
 	copy(metaDataBytes, plBytes[offset:offset+int(metaDataSize)])
 	offset += int(metaDataSize)
@@ -164,7 +164,7 @@ func decodeDeletePayload(plBytes []byte) (*deletePayload, error) {
 
 func decodeCheckSumCrc32(chBytes []byte) (uint32, error) {
 	if len(chBytes) != 4 {
-		return 0, fmt.Errorf("corrupt checksum : incomplete checksum")
+		return 0, fmt.Errorf("corrupt checksum: incomplete checksum")
 	}
 	checksum := binary.LittleEndian.Uint32(chBytes)
 	return checksum, nil
