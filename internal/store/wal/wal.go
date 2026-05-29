@@ -46,18 +46,23 @@ type WAL struct {
 	segID         uint64
 	syncPolicy    SyncPolicy
 	//  Graceful shutdown/ go rouint elifecylc management
-	//done        chan struct{} //signal to stop background sync
-	//wg          sync.WaitGroup // to wait for the routine to finish before closing the wal
+	done      chan struct{}  //signal to stop background sync using chan as kill switch by closing it
+	wg        sync.WaitGroup // to track and wait for the go  routine to finish before closing(releasing all the resources) the wal
+	closeOnce sync.Once      //for closing the wal once (idempotent)
 }
 
 func NewWAL(dir string, sp SyncPolicy) (*WAL, error) {
 	if sp < 1 || sp > 3 {
 		return nil, fmt.Errorf("invalid sync policy %d", sp)
 	}
+	//creating the directory for data persistence
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create wal directory: %w,", err)
+	}
 	//directroy scanning for latest segment
 	segID, found, err := getLatestSegmentID(dir)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to scan for latest segment id: %w", err)
 	}
 	var activeSeg *segment
 	var lsn uint64
@@ -66,12 +71,12 @@ func NewWAL(dir string, sp SyncPolicy) (*WAL, error) {
 		//open latest segment file
 		activeSeg, err = openExistingSegment(dir, segID)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to open existing segment: %w", err)
 		}
 		// : helper function getLatestLSN() to scan the segment for record and get lates lsn
 		lsn, err = getLatestLSN(*activeSeg)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to get latest lsn for segment %d: %w", segID, err)
 		}
 	case false:
 		// no segment file exists create new one
@@ -80,7 +85,7 @@ func NewWAL(dir string, sp SyncPolicy) (*WAL, error) {
 		lsn = 0
 		activeSeg, err = createSegment(dir, segID)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to create segment new segment %d: %w", segID, err)
 		}
 		// pointer to new segmentHeader
 		segHead := newSegmentHeader(walVersion, segID)
@@ -89,7 +94,7 @@ func NewWAL(dir string, sp SyncPolicy) (*WAL, error) {
 		//writing header to the segment file -> exactly one header per segment file
 		bytesWritten, err := activeSeg.file.Write(segHeadBytes)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to write segment header to segment %d: %w", activeSeg.segID, err)
 		}
 		if bytesWritten != segmentHeaderByteSize {
 			return nil, fmt.Errorf("Expected %d bytes segment header, got %d bytes written", segmentHeaderByteSize, bytesWritten)
@@ -103,9 +108,11 @@ func NewWAL(dir string, sp SyncPolicy) (*WAL, error) {
 		lsn:           lsn,
 		segID:         segID,
 		syncPolicy:    sp,
+		done:          make(chan struct{}),
 	}
 	// only one go rouinte per wal instance
 	if sp == SyncEverySec {
+		newWal.wg.Add(1) //for adding how many go routine are are spawned
 		go newWal.backgroundSync()
 	}
 	return newWal, nil
@@ -118,7 +125,7 @@ func getLatestSegmentID(dir string) (uint64, bool, error) {
 	var found bool
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return 0, false, err
+		return 0, false, fmt.Errorf("failed to read directory %s: %w", dir, err)
 	}
 	for _, entry := range entries {
 		fileName := entry.Name()
@@ -126,7 +133,7 @@ func getLatestSegmentID(dir string) (uint64, bool, error) {
 			numStr := strings.TrimSuffix(fileName, ".waldrky")
 			id, err := strconv.ParseUint(numStr, 10, 64)
 			if err != nil {
-				return 0, false, err
+				return 0, false, fmt.Errorf("failed to parse segment id form filename %s: %w", fileName, err)
 			}
 			if !found || id > segId {
 				segId = id
@@ -142,14 +149,14 @@ func getLatestLSN(activeSeg segment) (uint64, error) {
 	//open temporary second read only file descriptor and close it on function exit
 	file, err := os.Open(activeSeg.file.Name())
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("failed to open segment file for lsn scan: %w", err)
 	}
 	defer file.Close()
 	offset := segmentHeaderByteSize
 	// Jump the segment header
 	_, err = file.Seek(int64(offset), io.SeekStart)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("failed to seek in segment file: %w", err)
 	}
 	var latestLSN uint64
 	// buff to laod the recrod header
@@ -162,7 +169,7 @@ func getLatestLSN(activeSeg segment) (uint64, error) {
 				// Torn write or EOF reached
 				break
 			}
-			return 0, err
+			return 0, fmt.Errorf("failed to read record header: %w", err)
 		}
 		if n != int(recordHeaderByteSize) {
 			break
@@ -180,7 +187,7 @@ func getLatestLSN(activeSeg segment) (uint64, error) {
 		//jump to next record header byte
 		_, err = file.Seek(int64(newOffset), io.SeekCurrent)
 		if err != nil {
-			return 0, err
+			return 0, fmt.Errorf("failed to seek in segment file: %w", err)
 		}
 	}
 	return latestLSN, nil
@@ -215,17 +222,23 @@ func (wal *WAL) AppendInsert(extID string, intID uint64, vecData []float32, meta
 		//New segment file with new SegId and SegmentHeader written
 		err := wal.rotateSegment()
 		if err != nil {
-			return 0, err
+			return 0, fmt.Errorf("failed to rotate segment: %w", err)
 		}
 	}
 	//append to the segment file (new segment file if rotated or same)
-	wal.activeSegment.append(recordWrapperBytes)
+	bytesAppended, err := wal.activeSegment.append(recordWrapperBytes)
+	if bytesAppended != len(recordWrapperBytes) {
+		return 0, fmt.Errorf("failed to write record wrapper bytes: %w", err)
+	}
+	if err != nil {
+		return 0, fmt.Errorf("failed to write record wrapper bytes: %w", err)
+	}
 	// write bytes to disk according to sync policy
 	switch wal.syncPolicy {
 	case SyncAlways:
 		err := wal.activeSegment.file.Sync()
 		if err != nil {
-			return 0, err
+			return 0, fmt.Errorf("failed to sync segment %d: %w", wal.activeSegment.segID, err)
 		}
 	case SyncOS:
 		// do nothing os handles the sync
@@ -257,16 +270,23 @@ func (wal *WAL) AppendDelete(extID string, intID uint64) (uint64, error) {
 	if segmentFileSize > maxSegmentFileSize {
 		err := wal.rotateSegment()
 		if err != nil {
-			return 0, err
+			return 0, fmt.Errorf("failed to rotate segment: %w", err)
 		}
 	}
-	wal.activeSegment.append(recordWrapperBytes)
+	// write record wrapper bytes to the segment file
+	bytesAppended, err := wal.activeSegment.append(recordWrapperBytes)
+	if bytesAppended != len(recordWrapperBytes) {
+		return 0, fmt.Errorf("failed to write record wrapper bytes: %w", err)
+	}
+	if err != nil {
+		return 0, fmt.Errorf("failed to write record wrapper bytes: %w", err)
+	}
 	// write bytes to disk
 	switch wal.syncPolicy {
 	case SyncAlways:
 		err := wal.activeSegment.file.Sync()
 		if err != nil {
-			return 0, err
+			return 0, fmt.Errorf("failed to sync segment %d: %w", wal.activeSegment.segID, err)
 		}
 	case SyncOS:
 		//do nothing OS handles
@@ -284,13 +304,13 @@ func (wal *WAL) rotateSegment() error {
 	// Close current segment file
 	err := wal.activeSegment.file.Close()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to close current segment %d: %w", wal.activeSegment.segID, err)
 	}
 	wal.segID++
 	//create new segment
 	newSegment, err := createSegment(wal.dir, wal.segID)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create rotated segment %d: %w", wal.segID, err)
 	}
 	//write segment header
 	segHeader := newSegmentHeader(walVersion, wal.segID)
@@ -298,7 +318,7 @@ func (wal *WAL) rotateSegment() error {
 	//append the header bytes and incrrement the current size to bytes written
 	_, err = newSegment.append(segHeaderBytes)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to append header to rotated segment %d: %w", wal.segID, err)
 	}
 	wal.activeSegment = newSegment
 	return nil
@@ -307,25 +327,57 @@ func (wal *WAL) rotateSegment() error {
 // This implements the standard io.Closer interface.
 // go garbage collector doesn't clean OS resources so implement close for structures that hold OS resources
 func (wal *WAL) Close() error {
-	wal.mu.Lock()
-	defer wal.mu.Unlock()
+	var closeErr error
 
-	if wal.activeSegment != nil && wal.activeSegment.file != nil {
-		// Sync to disk before closing to ensure no data is lost
-		wal.activeSegment.file.Sync()
-		return wal.activeSegment.file.Close()
-	}
-	return nil
+	wal.closeOnce.Do(func() {
+		//trigger kill switch to stop all the backgroundSync routine
+		if wal.done != nil {
+			close(wal.done)
+		}
+		//wait for all the backgroundSync routine to exit
+		wal.wg.Wait()
+		//now lock and flush to disk and close
+		wal.mu.Lock()
+		defer wal.mu.Unlock()
+
+		if wal.activeSegment != nil && wal.activeSegment.file != nil {
+			// Sync to disk before closing to ensure no data is lost
+			if err := wal.activeSegment.file.Sync(); err != nil {
+				// Even if sync fails, we MUST close the file to prevent FD leaks.
+				// But we return the sync error so the caller knows the disk failed.
+				wal.activeSegment.file.Close()
+				wal.activeSegment.file = nil
+				closeErr = err
+				return
+			}
+			closeErr = wal.activeSegment.file.Close()
+			wal.activeSegment.file = nil
+		}
+	})
+	return closeErr
 }
 
 // TODO : update operation uisng delete and insert 2 operations for now later crate and update payload
 
 // background go routine for SyncEverySec fsync policy
 func (wal *WAL) backgroundSync() {
+	//signaling waitgroup this fucntion has exited
+	defer wal.wg.Done()
 	ticker := time.NewTicker(time.Second)
-	for range ticker.C {
-		wal.mu.Lock()
-		wal.activeSegment.file.Sync()
-		wal.mu.Unlock()
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			wal.mu.Lock()
+			//check to not sync a nil file if rotating
+			if wal.activeSegment != nil && wal.activeSegment.file != nil {
+				wal.activeSegment.file.Sync()
+			}
+			wal.mu.Unlock()
+		case <-wal.done:
+			//kill switch triggered exit loop and destroy routine
+			return
+		}
 	}
 }
