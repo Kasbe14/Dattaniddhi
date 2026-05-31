@@ -8,13 +8,17 @@ import (
 	"github.com/Kasbe14/Dattaniddhi/internal/vector"
 )
 
-// reconstruts existing collection from wal
+// reconstruts existing collection from wal, requres empty index(created in OpenCollection)
 func (c *Collection) LoadState() error {
 	// Lock the collection completely while we rebuild its memory
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	c.idCounter = 0
+	//again reseting the colleciton defensive for multiple load state calls in row
+	c.extToInt = make(map[string]int)
+	c.intToExt = make(map[int]string)
+	c.payload = make(map[string]any)
 	records, err := c.wal.Recover()
 	if err != nil {
 		return fmt.Errorf("wal failed to recover records: %w", err)
