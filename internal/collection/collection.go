@@ -39,7 +39,7 @@ type Result struct {
 
 //rootDir should belong to future DB object
 
-func CreateCollection(cfg CollectionConfig, rootDir string, sync wal.SyncPolicy) (*Collection, error) {
+func CreateCollection(cfg CollectionConfig, path string, sync wal.SyncPolicy) (*Collection, error) {
 	if cfg.Dimension <= 0 {
 		return nil, ErrInvalidDimension
 	}
@@ -58,17 +58,17 @@ func CreateCollection(cfg CollectionConfig, rootDir string, sync wal.SyncPolicy)
 	default:
 		return nil, ErrInvalidIndexType
 	}
-	cfgPath := filepath.Join(rootDir /*dbName*/, cfg.Name, "config.json")
+	cfgPath := filepath.Join(path, cfg.Name, "config.json")
 	_, err := os.Stat(cfgPath)
-	if !errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("failed to stat config file")
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("failed to stat config file: %w", err)
 	}
 	if err == nil {
 		return nil, ErrCollectionAlreadyExists
 	}
 	//assigning the version
 	cfg.Version = collectionConfigVersion
-	err = saveConfig(cfg, rootDir)
+	err = saveConfig(cfg, path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create collection %w", err)
 	}
@@ -84,7 +84,7 @@ func CreateCollection(cfg CollectionConfig, rootDir string, sync wal.SyncPolicy)
 		return nil, fmt.Errorf("index creation failed: %w", err)
 	}
 	//create wal instance for the collection
-	walPath := filepath.Join(rootDir /*,dbName*/, cfg.Name, "wal")
+	walPath := filepath.Join(path, cfg.Name, "wal")
 	wal, err := wal.NewWAL(walPath, sync)
 	if err != nil {
 		//wal.Close()
@@ -102,8 +102,8 @@ func CreateCollection(cfg CollectionConfig, rootDir string, sync wal.SyncPolicy)
 	return collection, nil
 }
 
-func OpenCollection(rootDir /*dbName*/, collectionName string, sync wal.SyncPolicy) (*Collection, error) {
-	collectionConfig, err := loadConfig(rootDir, collectionName)
+func OpenCollection(path, collectionName string, sync wal.SyncPolicy) (*Collection, error) {
+	collectionConfig, err := loadConfig(path, collectionName)
 	if errors.Is(err, ErrCollectionNotFound) {
 		return nil, err
 	}
@@ -124,7 +124,7 @@ func OpenCollection(rootDir /*dbName*/, collectionName string, sync wal.SyncPoli
 		return nil, fmt.Errorf("index creation failed: %w", err)
 	}
 
-	walPath := filepath.Join(rootDir /*,dbName*/, collectionName, "wal")
+	walPath := filepath.Join(path, collectionName, "wal")
 	wal, err := wal.NewWAL(walPath, sync)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open collection [%s]: %w", collectionName, err)
@@ -284,4 +284,7 @@ func (c *Collection) ExtToInt() map[string]int {
 
 func (c *Collection) IntToExt() map[int]string {
 	return c.intToExt
+}
+func (c *Collection) Name() string {
+	return c.config.Name
 }
