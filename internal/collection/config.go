@@ -73,12 +73,12 @@ func NewCollectionConfig(
 	}, nil
 }
 
-func saveConfig(cfg CollectionConfig, rootDir string) error {
+func saveConfig(cfg CollectionConfig, path string) error {
 	jsonData, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
-	fullpath := filepath.Join(rootDir /*,dbName*/, cfg.Name)
+	fullpath := filepath.Join(path /*,dbName*/, cfg.Name)
 	err = os.MkdirAll(fullpath, 0755)
 	if err != nil {
 		return fmt.Errorf("failed to make directory for config file: %w", err)
@@ -91,8 +91,8 @@ func saveConfig(cfg CollectionConfig, rootDir string) error {
 	return nil
 }
 
-func loadConfig(rootDir /*dbName,*/, colName string) (*CollectionConfig, error) {
-	filePath := filepath.Join(rootDir /*,dbName*/, colName, "config.json")
+func loadConfig(path, colName string) (*CollectionConfig, error) {
+	filePath := filepath.Join(path, colName, "config.json")
 
 	_, err := os.Stat(filePath)
 	if errors.Is(err, os.ErrNotExist) {
